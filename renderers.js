@@ -93,7 +93,18 @@ function renderHtml(tree) {
             const checkbox = tree.task
                 ? `<input type="checkbox" disabled${tree.checked ? " checked" : ""}> `
                 : "";
-            return `<li>${checkbox}${tree.children.map(renderHtml).join("\n")}</li>\n`;
+            // CommonMark "tight list": a single-paragraph item renders INLINE
+            // (no <p>), so "- [x] open task" shows checkbox+text on ONE line
+            // and a WYSIWYG backspace can actually merge them. Only when an
+            // item has multiple paragraphs (a loose list) do we wrap in <p>.
+            const paraCount = tree.children.filter(b => b.type === "paragraph").length;
+            const tight = paraCount <= 1;
+            const inner = tight
+                ? tree.children.map(b =>
+                      b.type === "paragraph" ? renderHtmlInline(b.children)
+                                             : renderHtml(b)).join("")
+                : tree.children.map(renderHtml).join("\n");
+            return `<li>${checkbox}${inner}</li>\n`;
         }
 
         case "code": {

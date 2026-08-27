@@ -74,11 +74,11 @@
             ["fenced code block",       "```js\nconst x = 1;\n```",               '<pre><code class="language-js">const x = 1;</code></pre>', "html"],
             ["indented code block",     "    const x = 1;",                      "<pre><code>const x = 1;</code></pre>", "html"],
             ["blockquote",              "> a\n> b",                              "<blockquote>\n<p>a\nb</p>\n</blockquote>", "html"],
-            ["unordered list",          "- a\n- b",                              "<ul>\n<li><p>a</p></li>\n<li><p>b</p></li>\n</ul>", "html"],
-            ["ordered list",            "1. a\n2. b",                            "<ol>\n<li><p>a</p></li>\n<li><p>b</p></li>\n</ol>", "html"],
-            ["nested list",             "- a\n  - sub\n- b",                     "<ul>\n<li><p>a</p>\n<ul>\n<li><p>sub</p></li>\n</ul></li>\n<li><p>b</p></li>\n</ul>", "html"],
-            ["task, done",              "- [x] done",                            '<ul>\n<li><input type="checkbox" disabled checked> <p>done</p></li>\n</ul>', "html"],
-            ["task, open",              "- [ ] todo",                            '<ul>\n<li><input type="checkbox" disabled> <p>todo</p></li>\n</ul>', "html"],
+            ["unordered list",          "- a\n- b",                              "<ul>\n<li>a</li>\n<li>b</li>\n</ul>", "html"],
+            ["ordered list",            "1. a\n2. b",                            "<ol>\n<li>a</li>\n<li>b</li>\n</ol>", "html"],
+            ["nested list",             "- a\n  - sub\n- b",                     "<ul>\n<li>a<ul>\n<li>sub</li>\n</ul></li>\n<li>b</li>\n</ul>", "html"],
+            ["task, done",              "- [x] done",                            '<ul>\n<li><input type="checkbox" disabled checked> done</li>\n</ul>', "html"],
+            ["task, open",              "- [ ] todo",                            '<ul>\n<li><input type="checkbox" disabled> todo</li>\n</ul>', "html"],
 
             // --- inline parsing ---
             ["strong",                  "**b**",                                 "<p><strong>b</strong></p>", "html"],

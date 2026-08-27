@@ -106,7 +106,7 @@ function mdListItem(li, depth, num) {
                  * indented new line ("- [x]\n  open task") instead of the
                  * canonical single line ("- [x] open task"). Skip it. */
                 if (!line.trim()) continue;
-                lines.push(indent + marker + task + line);
+                lines.push(indent + marker + task + line.trimStart());
                 placedMarker = true;
             } else {
                 lines.push(indent + "  " + line);

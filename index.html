@@ -103,8 +103,25 @@
         .check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); cursor: pointer; user-select: none; }
         .check input { accent-color: var(--accent); }
 
+        /* ---- view-mode segmented control (split / md / preview) ------- */
+        .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+        .seg-btn {
+            background: none;
+            border: 0;
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-family: inherit;
+            padding: 6px 13px;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+        .seg-btn:hover { color: var(--text); }
+        .seg-btn.active { color: var(--accent); background: rgba(76,255,154,0.10); }
+
         /* ---- the split layout ------------------------------------ */
         .layout { display: flex; flex: 1; min-height: 0; }
+        .gone { display: none !important; }   /* for the whole-view modes */
         .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
         .pane-label {
             padding: 7px 16px;
@@ -242,6 +259,11 @@
     <header>
         <h1><span class="dash">md</span>-format <span style="color:var(--muted)">// markdown live preview</span></h1>
         <div class="actions">
+            <div class="seg" id="viewSeg" title="whole-view mode — Ctrl/Cmd+1-3">
+                <button class="seg-btn active" data-view="split">Split</button>
+                <button class="seg-btn" data-view="md">Markdown</button>
+                <button class="seg-btn" data-view="preview">Preview</button>
+            </div>
             <button class="pill" id="resetBtn" title="restore the sample text">Reset</button>
             <button class="pill" id="copyBtn" title="copy the current output">Copy</button>
             <button class="pill primary" id="exportBtn" title="download the current output as a file">Export</button>
@@ -260,15 +282,15 @@
 
     <!-- ================= split layout ================= -->
     <div class="layout">
-        <div class="pane">
-            <div class="pane-label">Editor <span class="hint">paste that AI text</span></div>
+        <div class="pane" id="editorPane">
+            <div class="pane-label" id="editorLabel">Editor <span class="hint">paste that AI text</span></div>
             <textarea id="editor" spellcheck="false"></textarea>
         </div>
 
         <!-- draggable splitter between the two panes -->
         <div id="divider"></div>
 
-        <div class="pane">
+        <div class="pane" id="previewPane">
             <div class="pane-label" id="previewLabel">HTML preview</div>
             <div id="preview-scroll"></div>
         </div>
@@ -289,11 +311,17 @@
         // the demo is thin — it just feeds text in and draws the result.
         import { parse } from "./mdparser.js";
         import { render } from "./renderers.js";
+        import { domToMarkdown } from "./domtomd.js";
 
         /* ---- grab the DOM bits we'll need ---- */
         const editor      = document.getElementById("editor");
+        const editorPane  = document.getElementById("editorPane");
+        const editorLabel = document.getElementById("editorLabel");
         const preview     = document.getElementById("preview-scroll");
+        const previewPane = document.getElementById("previewPane");
         const previewLabel = document.getElementById("previewLabel");
+        const viewSeg     = document.getElementById("viewSeg");
+        const divider     = document.getElementById("divider");
         const outputSel   = document.getElementById("outputSel");
         const resetBtn    = document.getElementById("resetBtn");
         const copyBtn     = document.getElementById("copyBtn");
@@ -318,13 +346,54 @@
             localStorage.setItem("mdformat-theme", dark ? "dark" : "light");
         });
 
+        /* ---- whole-view modes: split everything, markdown only, preview only ----
+         * Persisted, because "open up in preview mode and type" is a real
+         * workflow — coming back to the same state matters. */
+        const VIEW_STORE = "mdformat-view";
+        let view = localStorage.getItem(VIEW_STORE) || "split";
+        const rootForMd = () => preview.querySelector(".md") || preview;
+
+        function applyView() {
+            const mdOnly = view === "md", pvOnly = view === "preview";
+            editorPane.classList.toggle("gone", pvOnly);
+            previewPane.classList.toggle("gone", mdOnly);
+            divider.style.display = mdOnly || pvOnly ? "none" : "";
+            for (const btn of viewSeg.querySelectorAll(".seg-btn")) {
+                btn.classList.toggle("active", btn.dataset.view === view);
+            }
+            editorLabel.querySelector(".hint").textContent =
+                mdOnly ? "markdown only — full screen" : "paste that AI text";
+            refresh();   // toggle the editing surface + caret handling
+        }
+        viewSeg.addEventListener("click", (e) => {
+            const btn = e.target.closest(".seg-btn");
+            if (!btn) return;
+            view = btn.dataset.view;
+            localStorage.setItem(VIEW_STORE, view);
+            applyView();
+            (view === "preview" ? preview : editor).focus();
+        });
+        window.addEventListener("keydown", (e) => {
+            if ((e.metaKey || e.ctrlKey) && ["1", "2", "3"].includes(e.key)) {
+                e.preventDefault();
+                view = ["split", "md", "preview"][+e.key - 1];
+                localStorage.setItem(VIEW_STORE, view);
+                applyView();
+            }
+        });
+
         /* ---- escaping for the "source" views ---- */
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-        /* ---- the one render function powering every output mode ---- */
-        function refresh() {
+        /* ---- is the preview currently an editable surface? (html output only) ---- */
+        let wysiwyg = false;
+
+        /* ---- the one render function powering every output mode ----
+         * refresh(srcOverride?) — normally reads editor.value, but WYSIWYG
+         * passes tokenised markdown so the caret markers exist in the DOM. */
+        function refresh(srcOverride) {
             try {
-                const src = editor.value;
+                const src = srcOverride != null ? srcOverride : editor.value;
                 const t0 = performance.now();
 
                 // parse once, render however the select says
@@ -338,12 +407,23 @@
                         // wrapped in .md so the preview styles (below) apply
                         preview.innerHTML = `<div class="md">${html}</div>`;
                         preview.removeAttribute("data-raw");
+                        // THE WYSIWYG switch: in html mode the preview is an
+                        // editing surface (unless we're in md-only view).
+                        wysiwyg = view !== "md";
+                        preview.contentEditable = wysiwyg ? "true" : "false";
+                        // typing/flipping a task box means the checkbox must be
+                        // clickable — the renderer emits `disabled`, undo that
+                        for (const cb of preview.querySelectorAll('input[type="checkbox"]')) {
+                            cb.disabled = false;
+                        }
                         break;
                     }
                     case "htmlsrc":
                     case "text":
                     case "ansi":
                     case "markdown": {
+                        wysiwyg = false;
+                        preview.contentEditable = "false";
                         let out = render(ast, type);
                         if (type === "ansi") {
                             // make the invisible ESC control-char visible as text,
@@ -356,6 +436,8 @@
                         break;
                     }
                     case "ast": {
+                        wysiwyg = false;
+                        preview.contentEditable = "false";
                         // the tree itself — education mode
                         const json = JSON.stringify(ast, null, 2);
                         preview.innerHTML = `<pre class="source">${esc(json)}</pre>`;
@@ -379,6 +461,138 @@
                 footerDot.style.color = "#ff6b6b";
             }
         }
+
+        /* ---- WYSIWYG: bidirectional writing through the rendered preview ----------
+         * The preview is contenteditable, so the user types into REAL html.
+         * Each edit we: (1) park hard-to-find caret markers in the original
+         * DOM, (2) walk the whole preview back to markdown, (3) write CLEAN
+         * markdown into the source editor (markers stripped), (4) re-render the
+         * preview FROM the tokenised markdown so the caret markers come back as
+         * ordinary text, (5) walk those tokens home — placing the caret exactly
+         * where the user left it — and strip them. The source editor is
+         * authoritative: preview edits become source edits, and source edits
+         * still drive the preview. Both directions, permanently in sync. */
+        const MARK = (id) => `\u200b\u200bSEL_${id}\u200b\u200b`;
+        const TOKEN_RE = /\u200b\u200bSEL_START\u200b\u200b|\u200b\u200bSEL_END\u200b\u200b/g;
+
+        function saveSelection(container) {
+            const sel = window.getSelection();
+            if (!sel.rangeCount || !container.contains(sel.anchorNode)) return;
+            const range = sel.getRangeAt(0);
+
+            // remember where the selection ENDS *before* we start inserting
+            // markers, so the earlier insertions can't shift the later one
+            const endNode = range.endContainer, endOff = range.endOffset;
+            const makeSpan = (id) => {
+                const s = document.createElement("span");
+                s.dataset.k = "SEL_" + id;
+                s.textContent = MARK(id);
+                return s;
+            };
+            const park = (node, offset, id) => {
+                const m = makeSpan(id);
+                if (node.nodeType === Node.TEXT_NODE) {
+                    if (offset > 0 && offset < node.length) {
+                        const rest = node.splitText(offset);
+                        node.parentNode.insertBefore(m, rest);
+                    } else if (offset === 0) {
+                        node.parentNode.insertBefore(m, node);
+                    } else {
+                        node.parentNode.insertBefore(m, node.nextSibling);
+                    }
+                } else {
+                    node.insertBefore(m, node.childNodes[offset] || null);
+                }
+            };
+            park(range.startContainer, range.startOffset, "START");
+            park(endNode, endOff, "END");
+        }
+
+        /* find a marker as plain TEXT anywhere in the rendered preview (it may
+         * live in a paragraph, a code block or a link — that's why we search
+         * text nodes, not elements) */
+        function locateToken(container, id) {
+            const needle = MARK(id);
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) {
+                const i = n.data.indexOf(needle);
+                if (i >= 0) return { node: n, index: i };
+            }
+            return null;
+        }
+
+        /* walk the caret markers home: place the selection between the START
+         * and END tokens, then remove the token characters from the DOM (and
+         * drop any now-empty marker spans the browser kept around) */
+        function restoreMarkers(container) {
+            const a = locateToken(container, "START");
+            if (!a) return;
+            const alen = MARK("START").length;
+            a.node.replaceData(a.index, alen, "");
+
+            const b = locateToken(container, "END");
+            const range = document.createRange();
+            if (b) {
+                const blen = MARK("END").length;
+                const bIndex = b.index;
+                b.node.replaceData(bIndex, blen, "");
+                range.setStart(a.node, a.index);
+                range.setEnd(b.node, bIndex);
+                dropEmptySpan(b.node);
+            } else {
+                range.setStart(a.node, a.index);
+                range.collapse(true);
+            }
+            dropEmptySpan(a.node);
+
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            preview.focus();
+
+            function dropEmptySpan(node) {
+                const p = node.parentNode;
+                if (p && p.tagName === "SPAN" && !p.textContent) p.remove();
+            }
+        }
+
+        /* the full round trip for one preview edit */
+        let wysiwygTimer = null;
+        function wysiwygSync() {
+            saveSelection(rootForMd());            // markers into the live DOM
+            let md;
+            try { md = domToMarkdown(rootForMd()); }
+            catch (err) { return; }
+
+            if (md !== editor.value) {
+                editor.value = md.replace(TOKEN_RE, "");   // clean source
+                refresh(md);                              // markers re-render as text
+                restoreMarkers(rootForMd());              // caret home + strip
+            } else {
+                restoreMarkers(rootForMd());              // nothing changed, unmark
+            }
+        }
+        const scheduleWysiwyg = () => {
+            clearTimeout(wysiwygTimer);
+            wysiwygTimer = setTimeout(wysiwygSync, 120);
+        };
+        preview.addEventListener("input", () => {
+            if (wysiwyg) scheduleWysiwyg();
+        });
+
+        /* clicking a task checkbox edits the DOM; fold that back to source too.
+         * We deliberately do NOT intercept the toggle — in a contenteditable a
+         * checkbox's native flip isn't reliably preventable with preventDefault,
+         * and fighting it causes a double-flip that undoes itself. The correct
+         * move is to let the browser change the box, then FOLD the now-current
+         * state back into the source via the 'change' event it fires after. */
+        preview.addEventListener("change", (e) => {
+            if (!wysiwyg) return;
+            if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") {
+                scheduleWysiwyg();
+            }
+        });
 
         /* ---- live re-render with a tiny debounce (keeps typing smooth) ---- */
         let refreshTimer = null;
@@ -454,7 +668,6 @@
         });
 
         /* ---- draggable splitter ---------------------------------------- */
-        const divider = document.getElementById("divider");
         let dragging = false;
         divider.addEventListener("mousedown", () => { dragging = true; divider.classList.add("dragging"); });
         window.addEventListener("mousemove", (e) => {
@@ -468,40 +681,75 @@
 
         /* ---- go ---- */
         editor.value = SAMPLE;
-        refresh();
+        applyView();   // boots the stored view mode AND does the first render
 
         /* ---- guarded layout self-test -----------------------------------
          * open the page as .../index.html?selftest and a #selftest div is
          * appended with the numbers that prove the two-scrollable-panes setup:
          * the window must NOT scroll, and BOTH panes must have scrollable
          * overflow. (headless CI reads this via --dump-dom) */
-        if (new URLSearchParams(location.search).has("selftest")) {
+if (new URLSearchParams(location.search).has("selftest")) {
             setTimeout(async () => {
                 const probe = document.createElement("div");
                 probe.id = "selftest";
                 const totalE = Math.max(1, editor.scrollHeight - editor.clientHeight);
                 const totalP = Math.max(1, preview.scrollHeight - preview.clientHeight);
+                const wait = (ms) => new Promise(r => setTimeout(r, ms));
                 const result = {
                     bodyOverflow: getComputedStyle(document.body).overflow,
                     windowScrollsPx: document.documentElement.scrollHeight - document.documentElement.clientHeight,
                     editorScrollablePx: editor.scrollHeight - editor.clientHeight,
                     previewScrollablePx: preview.scrollHeight - preview.clientHeight,
                 };
-                // 1) scroll the EDITOR at 40% -> preview should mirror it
-                // (native scroll events are flaky to synthesise headless, so we
-                // dispatch the event explicitly — this tests the handler LOGIC)
+
+                // 1) editor scroll at 40% -> preview mirrors it (and back at 80%)
                 syncCheck.checked = true;
                 editor.scrollTop = Math.round(totalE * 0.4);
                 editor.dispatchEvent(new Event("scroll"));
-                await new Promise(r => setTimeout(r, 40));
+                await wait(40);
                 result.previewAfterEditorScroll = +((preview.scrollTop / totalP).toFixed(3));
-                // 2) scroll the PREVIEW at 80% -> editor should mirror it
-                // (wait out the sync latch first so step 2 starts clean)
-                await new Promise(r => setTimeout(r, 180));
+                await wait(180);   // let the sync latch expire
                 preview.scrollTop = Math.round(totalP * 0.8);
                 preview.dispatchEvent(new Event("scroll"));
-                await new Promise(r => setTimeout(r, 40));
-                result.editorAfterPreviewScroll = +((editor.scrollTop / totalE).toFixed(3));;
+                await wait(40);
+                result.editorAfterPreviewScroll = +((editor.scrollTop / totalE).toFixed(3));
+
+                // 2) view modes: preview-only hides the editor pane, then back
+                viewSeg.querySelector('[data-view="preview"]').click();
+                result.pvOnlyHidesEditor = editorPane.classList.contains("gone");
+                viewSeg.querySelector('[data-view="split"]').click();
+                result.backToSplit = !editorPane.classList.contains("gone");
+
+                // 3) WYSIWYG: edit the preview directly -> source gets the text
+                let edited = false;
+                const firstP = rootForMd().querySelector("p");
+                const tn = firstP.firstChild;
+                if (tn && tn.nodeType === Node.TEXT_NODE) {
+                    const range = document.createRange();
+                    range.setStart(tn, 0); range.collapse(true);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges(); sel.addRange(range);
+                    tn.insertData(0, "PRE ");
+                    preview.dispatchEvent(new Event("input", { bubbles: true }));
+                    await wait(350);
+                    edited = true;
+                }
+                result.wysiwygBackWrite = edited && editor.value.includes("PRE ");
+                result.previewLeftovers =
+                    preview.querySelector('span[data-k^="SEL_"]') ? 0 : 1;
+
+                // 4) task checkbox click -> source flips the unchecked item to [x]
+                const box = rootForMd().querySelector('input[type="checkbox"]:not(:checked)');
+                if (box) { box.click(); await wait(300); }
+                result.taskToggleToSource = /\[x\] open task/.test(editor.value);
+                result.checkedBoxesNow = preview.querySelectorAll('input[type="checkbox"]:checked').length;
+
+                // 5) edit the SOURCE -> preview still follows (existing path)
+                editor.value += "\n\nTAIL999";
+                editor.dispatchEvent(new Event("input"));
+                await wait(300);
+                result.sourceToPreview = rootForMd().textContent.includes("TAIL999");
+
                 probe.textContent = JSON.stringify(result);
                 document.body.appendChild(probe);
             }, 400);

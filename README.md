@@ -28,10 +28,13 @@ supported**) stay in one place instead of being patched onto string output.
 python3 -m http.server 8000     # from this repo, then open :8000
 ```
 
-- **`index.html`** — the live-preview demo (editor / preview split, sync scroll,
-  dark mode, output switcher, AST inspector, export). This is the
-  markdown-live-preview-style app, but with our own engine under the hood.
-- **`test.html`** — the test harness: 29 locked-in cases, run green or you'll
+- **`index.html`** — the live editor: split / **markdown-only** / **preview-only**
+  views, sync scroll, dark mode, output switcher, AST inspector, export. In HTML
+  preview mode the rendered document is **bidirectionally editable** — type
+  straight into the rendered output (WYSIWYG) and your keystrokes are folded
+  back into the markdown source; task checkboxes are clickable; the caret is
+  restored to the exact spot after every round-trip.
+- **`test.html`** — the test harness: 29 locked-in parsing cases, run green or you'll
   know about it.
 
 ## Use it as an API — invoke from anywhere
@@ -127,9 +130,10 @@ frozen until you deliberately change it. Run it any time before shipping.
 ## Files
 
 ```
-mdparser.js   the parser:  markdown text  →  AST        (the thinky half)
-renderers.js  the renderer: AST → html/text/ansi/markdown (the drawy half)
-index.html    live-preview demo app
+mdparser.js   the parser:   markdown text  →  AST          (the thinky half)
+renderers.js  the renderer: AST → html/text/ansi/markdown   (the drawy half)
+domtomd.js    the inverse:  rendered DOM   →  markdown text (WYSIWYG half)
+index.html    the live editor: split / markdown / preview views + edit-in-preview
 test.html     assertions over the parser & renderers
 ```
 

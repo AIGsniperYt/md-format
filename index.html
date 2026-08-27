@@ -131,6 +131,40 @@
         .gone { display: none !important; }   /* for the whole-view modes */
         .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1 1 0; overflow: hidden; }
 
+        /* ---- the formatting toolbar: sits between header and panes,
+         * every button edits the SOURCE (driving both panes). The bar is just
+         * a flex row that wraps on narrow windows; buttons are transparent by
+         * default and gain a soft panel hover so they read as tools, not as
+         * form fields. Styled with the live theme vars like everything else. */
+        .bar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+        }
+        .bar .sep { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+        .tbtn {
+            font: inherit;
+            font-size: 0.78rem;
+            line-height: 1;
+            min-width: 30px;
+            height: 28px;
+            padding: 0 9px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: none;
+            color: var(--muted);
+            cursor: pointer;
+            transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+        }
+        .tbtn:hover { color: var(--text); background: var(--panel2); border-color: var(--border); }
+        .tbtn:active { background: rgba(76,255,154,0.10); color: var(--accent); }
+        .tbtn b { font-weight: 700; }
+        .tbtn s { text-decoration: line-through; }
+
         /* ---- the editor ------------------------------------------ */
         #editor {
             flex: 1;
@@ -306,6 +340,34 @@
         </div>
     </header>
 
+    <!-- ================= formatting toolbar =================
+         Every button is a plain <button class="tbtn" data-tool="...">.
+         The data-tool is ALL the JS needs to know: the click handler maps
+         it straight into a markdown edit (see formatText), and B/italic/
+         strike use the actual formatting tag <b>/<i>/<s> so the button
+         already LOOKS like what it does. Grouped into little clusters with
+         <span class="sep"> dividers: inline marks | headings | blocks. -->
+    <div class="bar" id="toolbar">
+        <button class="tbtn" data-tool="bold" title="Bold (select text first)"><b>B</b></button>
+        <button class="tbtn" data-tool="italic" title="Italic"><i>I</i></button>
+        <button class="tbtn" data-tool="strike" title="Strikethrough"><s>S</s></button>
+        <button class="tbtn" data-tool="code" title="Inline code"><code>&lt;/&gt;</code></button>
+        <span class="sep"></span>
+        <button class="tbtn" data-tool="h1" title="Heading 1">H1</button>
+        <button class="tbtn" data-tool="h2" title="Heading 2">H2</button>
+        <button class="tbtn" data-tool="h3" title="Heading 3">H3</button>
+        <span class="sep"></span>
+        <button class="tbtn" data-tool="quote" title="Blockquote">Quotation</button>
+        <button class="tbtn" data-tool="ul" title="Bullet list">&#8226; List</button>
+        <button class="tbtn" data-tool="ol" title="Numbered list">1. List</button>
+        <button class="tbtn" data-tool="task" title="Task checkbox">[ ] Task</button>
+        <span class="sep"></span>
+        <button class="tbtn" data-tool="link" title="Link">Link</button>
+        <button class="tbtn" data-tool="img" title="Image">Image</button>
+        <button class="tbtn" data-tool="codeblock" title="Fenced code block">&lt;/&gt; block</button>
+        <button class="tbtn" data-tool="hr" title="Horizontal rule">&#8212;</button>
+    </div>
+
     <!-- ================= split layout ================= -->
 <div class="layout">
         <div class="pane" id="editorPane">
@@ -350,6 +412,10 @@
         const exportBtn   = document.getElementById("exportBtn");
         const syncCheck   = document.getElementById("syncScroll");
         const themeToggle = document.getElementById("themeToggle");
+        const toolbarBar  = document.getElementById("toolbar"); // "toolbar" alone is a real
+                                                                  // window API (window.toolbar),
+                                                                  // so alias it to avoid GIL
+                                                                  // shadowing the element in a module
         const statChars   = document.getElementById("statChars");
         const statBlocks  = document.getElementById("statBlocks");
         const statTime    = document.getElementById("statTime");
@@ -680,6 +746,231 @@
             }
         });
 
+        /* ---- formatting toolbar: every button edits the SOURCE ----------
+         * The source editor is authoritative (both panes render from it), so a
+         * toolbar press always rewrites editor.value and refreshes. The tricky
+         * part is figuring WHERE to apply it when the caret lives in the
+         * WYSIWYG preview: we park two private-use sentinel characters at the
+         * selection, serialize the DOM to markdown (the sentinels ride along),
+         * read their positions in the md, then STRIP them before writing — so
+         * the md is clean and the sentinels vanish the moment the preview
+         * re-renders. No scanner can ever collide with `\uE000`/`\uE002`. */
+        toolbarBar.addEventListener("mousedown", (e) => e.preventDefault());   // keep focus (caret) where it is
+        toolbarBar.addEventListener("click", (e) => {
+            const btn = e.target.closest(".tbtn");
+            if (!btn) return;
+            e.preventDefault();
+            applyTool(btn.dataset.tool);
+        });
+
+        /* parkSent: drop a private-use sentinel character INTO the live DOM at
+         * a caret/selection edge. We don't disturb the browser's own selection
+         * — we just make sure that when the DOM gets serialized to markdown,
+         * the sentinel lands in the string at the exact index the caret pointed
+         * to. `\uE000`/`\uE002` are private-use, nobody types them, so the
+         * scanner can never trip on one. We split the text node at the offset
+         * so the sentinel is truly BETWEEN characters, and insert it before the
+         * node (offset 0) or after it (offset === length). */
+        function parkSent(node, off, ch) {
+            const m = document.createTextNode(ch);
+            if (node.nodeType === Node.TEXT_NODE) {
+                if (off > 0 && off < node.length) {
+                    const rest = node.splitText(off);
+                    node.parentNode.insertBefore(m, rest);
+                } else if (off === 0) {
+                    node.parentNode.insertBefore(m, node);
+                } else {
+                    node.parentNode.insertBefore(m, node.nextSibling);
+                }
+            } else {
+                node.insertBefore(m, node.childNodes[off] || null);
+            }
+        }
+
+        /* wrapInline: bold / italic / strike / inline-code all share this. It
+         * wraps the selection with a marker pair, and pressing the SAME button
+         * again UNWRAPS it instead of double-wrapping — so a toolbar press is
+         * always a toggle. With NO selection (just a caret) it inserts the
+         * markers with the caret parked between them, ready to type the word.
+         * Returns { text, s, e } describing the new source + where the caret
+         * should end up — applyTool uses e to place a collapsed caret (see the
+         * "don't leave a highlight" note down in applyTool). */
+        function wrapInline(src, s, e, pre, post) {
+            const sel = src.slice(s, e);
+            if (s === e) {                        // no selection → place caret in markers
+                const text = src.slice(0, s) + pre + post + src.slice(e);
+                const at = s + pre.length;
+                return { text, s: at, e: at };
+            }
+            const isWrapped = src.slice(Math.max(0, s - pre.length), s) === pre &&
+                              src.slice(e, e + post.length) === post;
+            if (isWrapped) {                      // press again → unwrap
+                const text = src.slice(0, s - pre.length) + sel + src.slice(e + post.length);
+                return { text, s: s - pre.length, e: e - pre.length };
+            }
+            const text = src.slice(0, s) + pre + sel + post + src.slice(e);
+            return { text, s, e: e + pre.length + post.length };
+        }
+
+        /* linePrefix: headings, quotes and lists are PREFIX markers, not wraps.
+         * We take the whole line(s) the selection touches, toggle the prefix on
+         * every line (if the line already has it, strip it — same toggle logic
+         * as wrapInline), and splice the line back. Handles a multi-line
+         * selection across several paragraphs by splitting on \n. */
+        function linePrefix(text, s, e, prefix) {
+            const ls = text.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
+            const nl = text.indexOf("\n", e);
+            const le = nl < 0 ? text.length : nl;
+            const out = text.slice(ls, le).split("\n")
+                .map(l => l.startsWith(prefix) ? l.slice(prefix.length) : prefix + l)
+                .join("\n");
+            return { text: text.slice(0, ls) + out + text.slice(le), s: ls, e: ls + out.length };
+        }
+
+        /* formatText: the only place a toolbar request knows about markdown
+         * syntax. Every case reduces to "wrap a span" (bold/italic/...),
+         * "prefix some lines" (headings/lists/quotes) or "dump a block in"
+         * (link/img/codeblock/hr). Returns null only when the user cancels a
+         * prompt — applyTool bails out without touching the source. */
+        function formatText(src, s, e, tool) {
+            const sel = src.slice(s, e);
+            switch (tool) {
+                case "bold":   return wrapInline(src, s, e, "**", "**");
+                case "italic": return wrapInline(src, s, e, "*", "*");
+                case "strike": return wrapInline(src, s, e, "~~", "~~");
+                case "code":   return wrapInline(src, s, e, "`", "`");
+                case "link": {
+                    const url = prompt("Link URL", "https://");
+                    if (!url) return null;
+                    const md = `[${sel || "text"}](${url})`;
+                    return { text: src.slice(0, s) + md + src.slice(e), s: s + md.length, e: s + md.length };
+                }
+                case "img": {
+                    const url = prompt("Image URL", "https://");
+                    if (!url) return null;
+                    const md = `![${sel || "alt"}](${url})`;
+                    return { text: src.slice(0, s) + md + src.slice(e), s: s + md.length, e: s + md.length };
+                }
+                case "h1": return linePrefix(src, s, e, "# ");
+                case "h2": return linePrefix(src, s, e, "## ");
+                case "h3": return linePrefix(src, s, e, "### ");
+                case "quote": return linePrefix(src, s, e, "> ");
+                case "ul": return linePrefix(src, s, e, "- ");
+                case "ol": return linePrefix(src, s, e, "1. ");
+                case "task": return linePrefix(src, s, e, "- [ ] ");
+                case "codeblock": {
+                    const ls = src.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
+                    const nl = src.indexOf("\n", e);
+                    const le = nl < 0 ? src.length : nl;
+                    const md = "```\n" + src.slice(ls, le) + "\n```";
+                    const text = src.slice(0, ls) + md + src.slice(le);
+                    return { text, s: ls + md.length, e: ls + md.length };
+                }
+                case "hr": {
+                    const md = "\n\n---\n\n";
+                    const text = src.slice(0, s) + md + src.slice(e);
+                    const at = s + md.length;
+                    return { text, s: at, e: at };
+                }
+            }
+            return { text: src, s, e };
+        }
+
+        /* restoreByContext: put the caret back after the source changed.
+         * applyTool captured a "fingerprint" (the first 140 chars of the text
+         * node the caret was in + the offset) BEFORE xre-rendering. The old
+         * idea — search one text node for the needle — is brittle because a
+         * bold wrap SPLITS the text across the new <strong> (…</strong>nede…),
+         * so the needle never matches one node. Instead we glue ALL the text
+         * nodes together, find the needle in the whole string, then walk the
+         * node list to convert that character offset back into (node, offset).
+         * If the fingerprint is gone entirely (a brutal edit moved everything)
+         * we just leave the caret alone rather than teleport it somewhere
+         * wrong. */
+        function restoreByContext(container, ctx) {
+            if (!ctx) return;
+            const needle = ctx.text.slice(0, 28);
+            const parts = [];
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) parts.push({ n, t: n.data });
+            if (!parts.length) return;
+            const joined = parts.map(p => p.t).join("");
+            const i = joined.indexOf(needle);
+            if (i < 0) return;                 // page changed too hard — let it be
+            let pos = Math.min(i + ctx.off, joined.length - 1);
+            let acc = 0, k = 0;
+            while (k < parts.length && acc + parts[k].t.length <= pos) { acc += parts[k].t.length; k++; }
+            const node = parts[Math.min(k, parts.length - 1)].n;
+            const o = Math.min(pos - acc, node.data.length);
+            const range = document.createRange();
+            range.setStart(node, o); range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+        }
+
+        /* applyTool: the one shared entry point for every toolbar button.
+         * The tricky part is KNOWING WHERE THE EDIT MEANS. If the caret lives
+         * in the live preview we have to park sentinel tokens at the selection,
+         * fold the DOM back to markdown, and let the markdown offsets describe
+         * the target region — the DOM and the source never share coordinates,
+         * so the sentinels are the only bridge. If the caret is in the textarea
+         * we can skip all that and use selectionStart/End directly. */
+        function applyTool(tool) {
+            const caretInPreview = wysiwyg && preview.contains(document.activeElement);
+            let src, s, e, ctx = null;
+            if (caretInPreview) {
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                const r = sel.getRangeAt(0);
+                if (!rootForMd().contains(r.startContainer)) return;
+                if (sel.focusNode && sel.focusNode.nodeType === Node.TEXT_NODE) {
+                    // grab a fingerprint of what's under the caret BEFORE we
+                    // nuke the DOM — restoreByContext hunts for it afterwards
+                    ctx = { text: sel.focusNode.data.slice(0, 140), off: sel.focusOffset };
+                }
+                parkSent(r.startContainer, r.startOffset, "\uE000");
+                parkSent(r.endContainer, r.endOffset, "\uE002");
+                const md = domToMarkdown(rootForMd());
+                let a = md.indexOf("\uE000");
+                let b = md.indexOf("\uE002");
+                src = md.replace(/[\uE000\uE002]/g, "");
+                if (a < 0) a = 0;
+                if (b < 0) b = src.length;
+                if (a > b) { const t = a; a = b; b = t; }   // backwards selection
+                // a and b point AT the sentinel positions in `md`. The opening
+                // sentinel sits where the source selection starts (a), but the
+                // CLOSING one sits immediately AFTER the selection — so the
+                // real end in the stripped source is b - 1, not b. Get this
+                // wrong and every wrap swallows one extra character.
+                s = a;
+                e = Math.max(a, b - 1);
+            } else {
+                src = editor.value;
+                s = editor.selectionStart ?? 0;
+                e = editor.selectionEnd ?? 0;
+                ctx = { text: src.slice(Math.max(0, s - 70), s + 70), off: 70 };
+            }
+            const out = formatText(src, s, e, tool);
+            if (!out) return;   // user cancelled a prompt
+            editor.value = out.text;
+            if (caretInPreview) {
+                refresh();                    // re-render from the formatted source
+                preview.focus({ preventScroll: true });
+                restoreByContext(rootForMd(), ctx);
+            } else {
+                editor.focus();
+                // IMPORTANT: collapse the caret to the END of the formatted span.
+                // Re-selecting the span would leave it highlighted, and the next
+                // keystroke would REPLACE that highlight — nuking the format and
+                // the original text we just wrapped. A collapsed caret lets you
+                // keep typing straight after, nothing to overwrite.
+                const at = Math.min(out.e, out.text.length);
+                editor.setSelectionRange(at, at);
+                refresh();
+            }
+        }
+
         /* ---- draggable splitter: changes a RATIO, never an absolute size.
          * `flex-basis%` is relative, so after a window resize the split keeps
          * its proportion — the panes are a lens, not bolted to the window. */
@@ -714,6 +1005,8 @@
          * overflow. (headless CI reads this via --dump-dom) */
 if (new URLSearchParams(location.search).has("selftest")) {
             setTimeout(async () => {
+                window.__err = null;
+                self.addEventListener("error", (e) => { window.__err = String(e.message || e.error || e); });
                 const probe = document.createElement("div");
                 probe.id = "selftest";
                 const totalE = Math.max(1, editor.scrollHeight - editor.clientHeight);
@@ -726,6 +1019,7 @@ if (new URLSearchParams(location.search).has("selftest")) {
                     previewScrollablePx: preview.scrollHeight - preview.clientHeight,
                 };
 
+                try {
                 // 1) editor scroll at 40% -> preview mirrors it (and back at 80%)
                 syncCheck.checked = true;
                 editor.scrollTop = Math.round(totalE * 0.4);
@@ -853,10 +1147,65 @@ if (new URLSearchParams(location.search).has("selftest")) {
                     const s2 = window.getSelection();
                     result.enterSplitP = rootForMd().querySelectorAll("p").length > 1 ? 1 : 0;
                     result.enterNewlineInSource = editor.value.split("\n").length > (SAMPLE.split("\n").length) ? 1 : 0;
-                    result.enterCaretNode = s2.rangeCount && s2.anchorNode ?
-                        (s2.anchorNode.nodeType === Node.TEXT_NODE ? s2.anchorNode.parentNode.tagName : s2.anchorNode.nodeName) : "none";
+result.enterCaretNode = s2.rangeCount && s2.anchorNode ?
+                    (s2.anchorNode.nodeType === Node.TEXT_NODE ? s2.anchorNode.parentNode.tagName : s2.anchorNode.nodeName) : "none";
                 }
 
+                // 8) formatting toolbar: bold wraps the preview selection, an
+                //    H2 prefixes the caret line, and no sentinel chars leak.
+                //    The UX rule being defended: after a toolbar press the
+                //    caret is COLLAPSED (no highlight lingers), so your next
+                //    keystroke KEEPS TYPING instead of replacing the format
+                //    and the words it wrapped.
+                const mkW = document.createTreeWalker(rootForMd(), NodeFilter.SHOW_TEXT);
+                let tN = null;
+                while ((tN = mkW.nextNode()) && !(tN.data.length > 6)) {}
+                if (tN && tN.data.length > 6) {
+                    const sr = document.createRange();
+                    sr.setStart(tN, 0); sr.setEnd(tN, 4);
+                    const ssel = window.getSelection();
+                    ssel.removeAllRanges(); ssel.addRange(sr);
+                    preview.focus({ preventScroll: true });
+                    toolbarBar.querySelector('[data-tool="bold"]').click();
+                    await wait(300);
+                    result.toolBoldMarkers = editor.value.includes("**");
+                    // pressing bold must leave NO highlight — only a caret
+                    result.toolCaretCollapsed = window.getSelection().isCollapsed ? 1 : 0;
+                    // typing right away must NOT burn the format down: the bold
+                    // word survives, the markers survive, and the keystrokes
+                    // land adjacent — the browser may continue the bold run OR
+                    // append right after it, both are safe.
+                    const bm = editor.value.match(/\*\*([^*\n]{1,12})\*\*/);
+                    document.execCommand("insertText", false, "ZX");
+                    await wait(350);   // wysiwyg folds back via its 120ms debounce
+                    result.toolTypingKeepsBold =
+                        (bm && (editor.value.includes("**" + bm[1] + "ZX") ||
+                                editor.value.includes(bm[1] + "**ZX"))) ? 1 : 0;
+                    // caret is still on the bolded run — promote its line to H2
+                    toolbarBar.querySelector('[data-tool="h2"]').click();
+                    await wait(300);
+                    result.toolHeadingPfx = editor.value.split("\n").some(l => l.startsWith("## "));
+                }
+                // editor-path check: select raw source in the textarea, bold it,
+                // and confirm the caret ALSO comes out collapsed (out.e, not a
+                // highlighted span over the **...** markers) — same rule, other side
+                const p0 = editor.value.indexOf("catalogue");
+                if (p0 >= 0) {
+                    editor.focus();
+                    editor.setSelectionRange(p0, p0 + 9);
+                    toolbarBar.querySelector('[data-tool="bold"]').click();
+                    await wait(300);
+                    result.toolEditorBold = editor.value.includes("**catalogue**") ? 1 : 0;
+                    result.toolEditorCollapsed =
+                        (editor.selectionStart === editor.selectionEnd) ? 1 : 0;
+                }
+                result.toolSentinelLeak =
+                    /[\uE000\uE002]/.test(editor.value + preview.textContent) ? 0 : 1;
+                result.jsErr = window.__err;
+
+                } catch (err) {
+                    result.jsErr = String(err && err.stack || err);
+                }
                 probe.textContent = JSON.stringify(result);
                 document.body.appendChild(probe);
             }, 400);

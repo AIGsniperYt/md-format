@@ -18,6 +18,7 @@
  *   a      → [text](href)   img            → ![alt](src)
  *   ul/ol  → - / 1. markers li             → + checkbox if task
  *   blockquote → > lines    hr             → ---          br → "  " hard break
+ *   table  → pipe table with a "---" gutter (alignment carried from th align)
  *
  * Why is this in its own file and not stuck in index.html? Two reasons: it's
  * the third leg of the engine (md→out, out→md, inspect) so it deserves to be a
@@ -56,8 +57,38 @@ function mdBlock(node, depth) {
 
         case "hr":
             return "---";
+
+        /* a <table> folds back to pipes. The header lives in <thead><tr><th>
+         * (our renderer always emits one when the source had a header), and
+         * the body rows are the <tr> in <tbody>. Alignment comes back out of
+         * the th "align" attribute, so ":---" in the source stays honest. */
+        case "table": {
+            const out = [];
+            const head = node.querySelector("thead > tr");
+            if (head) {
+                const ths = Array.from(head.children)
+                    .filter(c => c.nodeType === Node.ELEMENT_NODE && c.tagName.toLowerCase() === "th");
+                out.push(`| ${ths.map(th => mdInlineChildren(th).trim()).join(" | ")} |`);
+                out.push(`| ${ths.map(th => mdTableAlign(th.getAttribute("align"))).join(" | ")} |`);
+            }
+            const body = node.querySelector("tbody") || node;
+            for (const tr of body.querySelectorAll("tr")) {
+                const tds = Array.from(tr.children)
+                    .filter(c => c.nodeType === Node.ELEMENT_NODE && c.tagName.toLowerCase() === "td");
+                out.push(`| ${tds.map(td => mdInlineChildren(td).trim()).join(" | ")} |`);
+            }
+            return out.join("\n");
+        }
     }
     return mdInline(node);   // anything else → treat as inline text
+}
+
+/* --- table gutter: turn a th "align" attribute back into a delimiter cell --- */
+function mdTableAlign(arr) {
+    if (arr === "left") return ":---";
+    if (arr === "center") return ":--:";
+    if (arr === "right") return "---:";
+    return "---";
 }
 
 /* --- lists: `- ` for unordered, `1. ` for ordered (keeping the start number) */

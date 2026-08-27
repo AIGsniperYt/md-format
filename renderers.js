@@ -118,6 +118,20 @@ function renderHtml(tree) {
             return `<hr>`;
         }
 
+        case "table": {
+            // alignment marker per column; absent alignment emits no attribute.
+            const al = a => a ? ` align="${a}"` : "";
+            const head = tree.headers.length
+                ? `<thead>\n<tr>${tree.headers.map((c, j) => `<th${al(tree.align[j])}>${renderHtmlInline(c)}</th>`).join("")}</tr>\n</thead>`
+                : "";
+            const body = tree.rows.length
+                ? `<tbody>\n${tree.rows.map(row =>
+                    `<tr>${row.map((c, j) => `<td${al(tree.align[j])}>${renderHtmlInline(c)}</td>`).join("")}</tr>`
+                  ).join("\n")}\n</tbody>`
+                : "";
+            return `<table>\n${head}${body}</table>`;
+        }
+
         default: {
             throw new Error(`renderHtml: unknown block type "${tree.type}"`);
         }
@@ -198,6 +212,13 @@ function renderText(tree) {
         case "hr":
             return "----------------------------------------";
 
+        case "table": {
+            // a table is just columns squared up with " | " — the header row
+            // first, then every data row underneath it.
+            const line = row => row.map(renderTextInline).join(" | ");
+            return [line(tree.headers), ...tree.rows.map(line)].filter(s => s.length).join("\n");
+        }
+
         default:
             throw new Error(`renderText: unknown block type "${tree.type}"`);
     }
@@ -277,6 +298,13 @@ function renderAnsi(tree) {
         case "hr":
             return `${ANSI.gray}────────────────────────${ANSI.reset}`;
 
+        case "table": {
+            // a plain squared-up table; cells don't get their own codes, the
+            // inline styling inside them (bold links etc.) already does.
+            const line = row => row.map(renderAnsiInline).join(" | ");
+            return [line(tree.headers), ...tree.rows.map(line)].filter(s => s.length).join("\n");
+        }
+
         default:
             throw new Error(`renderAnsi: unknown block type "${tree.type}"`);
     }
@@ -352,6 +380,21 @@ function renderMarkdown(tree) {
 
         case "hr":
             return "---";
+
+        case "table": {
+            // round-trip faithful: the header, an alignment gutter, then the
+            // body — every row wrapped in pipes so it re-parses exactly.
+            const delim = j => tree.align[j] === "left" ? ":---"
+                             : tree.align[j] === "center" ? ":--:"
+                             : tree.align[j] === "right" ? "---:"
+                             : "---";
+            const line = row => `| ${row.map(renderMarkdownInline).join(" | ")} |`;
+            const head = tree.headers.length ? line(tree.headers) : "";
+            const gutter = head
+                ? `| ${tree.headers.map((_, j) => " " + delim(j) + " ").join(" | ")} |`
+                : "";
+            return [head, gutter, ...tree.rows.map(line)].filter(s => s.length).join("\n");
+        }
 
         default:
             throw new Error(`renderMarkdown: unknown block type "${tree.type}"`);

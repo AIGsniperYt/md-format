@@ -26,6 +26,7 @@
  *   { type: "listitem",   task?, checked?, children: [...] }  child BLOCKS
  *   { type: "code",       lang?, text }              raw text, no children
  *   { type: "hr" }
+ *   { type: "table",      align, headers, rows }     pipe table; align per column
  *
  * Inlines (the words inside a paragraph/heading):
  *   { type: "text",          value }                 plain words
@@ -230,6 +231,24 @@ export function parseBlocks(lines) {
             continue;
         }
 
+        // ---- pipe table: "| a | b |" over a "|---|" ruler ---------------------
+        // A table is TWO committed lines: a header row that contains a pipe and
+        // a delimiter row made of dashes (with optional alignment colons). No
+        // delimiter → it's just a paragraph, so a stray "| a | b |" in prose
+        // still falls through to the paragraph catch-all below.
+        if (line.indexOf("|") >= 0 && i + 1 < n) {
+            const ruler = splitCells(lines[i + 1]);
+            const looksLikeTable = ruler.length > 0 &&
+                ruler.every(c => /^:?-+:?$/.test(c)) &&
+                ruler.some(c => c.includes("-"));
+            if (looksLikeTable) {
+                const { node, next } = parseTable(lines, i, line, lines[i + 1]);
+                blocks.push(node);
+                i = next;
+                continue;
+            }
+        }
+
         // ---- paragraph: the catch-all ------------------------------------------
         // Eat lines until something clearly starts a new block. One subtlety:
         // a "====" or "----" line right after text is a SETEXT heading, not a
@@ -377,6 +396,59 @@ function parseList(lines, start, first) {
 
     // `next` = where parsing should resume (right after the last item line)
     return { node: { type: "list", ordered, start: startNum, items }, next: i };
+}
+
+/* ----------------------------------------------------------------------------
+ * PIPE TABLES — the one "power" block kept on purpose.
+ * ----------------------------------------------------------------------------
+ * parseTable(lines, i, headLine, delimLine) consumes a table started on the
+ * header line. Rows after the delimiter run until a blank line or a line
+ * without a pipe — a brand-new paragraph ends the table. Every cell goes
+ * through the normal INLINE parser, so **bold** and [links](url) inside a
+ * table cell just work. Returns { node, next } like parseList does.
+ */
+function parseTable(lines, i, headLine, delimLine) {
+    const n = lines.length;
+    const align = splitCells(delimLine).map(cellAlign);
+    const headers = splitCells(headLine).map(parseInline);
+    const rows = [];
+    let row = i + 2;
+    while (row < n) {
+        const line = lines[row];
+        if (isBlank(line) || line.indexOf("|") < 0) break;
+        rows.push(splitCells(line).map(parseInline));
+        row++;
+    }
+    return { node: { type: "table", align, headers, rows }, next: row };
+}
+
+/* splitCells("| a | b |") → ["a", "b"]. Both "| a | b |" and bare "a | b"
+ * work (leading/trailing pipes are optional), and a "\\|" is a literal pipe
+ * inside a cell, not a separator. */
+function splitCells(line) {
+    let t = line.trim();
+    if (t.startsWith("|")) t = t.slice(1);
+    if (t.endsWith("|")) t = t.slice(0, -1);
+    const cells = [];
+    let cur = "";
+    for (let k = 0; k < t.length; k++) {
+        const ch = t[k];
+        if (ch === "\\" && t[k + 1] === "|") { cur += "|"; k++; }       // escaped pipe
+        else if (ch === "|") { cells.push(cur.trim()); cur = ""; }
+        else cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+}
+
+/* cellAlign(":---") → "left" | "center" | "right" | null. The delimiter row
+ * is a pipe table's only alignment signal: colons on the ends put the content
+ * against the fences ("---:" right, ":---" left) and both ends mean centered. */
+function cellAlign(cell) {
+    if (cell.startsWith(":") && cell.endsWith(":")) return "center";
+    if (cell.startsWith(":")) return "left";
+    if (cell.endsWith(":")) return "right";
+    return null;
 }
 
 

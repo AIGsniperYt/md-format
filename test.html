@@ -95,6 +95,25 @@
             ["bare url",                "see https://a.io.",                     '<p>see <a href="https://a.io">https://a.io</a></p>', "html"],
             ["hard line break",         "a  \nb",                                "<p>a<br>\nb</p>", "html"],
 
+            // --- tables ---
+            ["table, basic",               "| a | b |\n| --- | --- |\n| 1 | 2 |",
+                                            "<table>\n<thead>\n<tr><th>a</th><th>b</th></tr>\n</thead><tbody>\n<tr><td>1</td><td>2</td></tr>\n</tbody></table>", "html"],
+            ["table, aligned",             "| a | b |\n| :--- | ---: |\n| 1 | 2 |",
+                                            '<table>\n<thead>\n<tr><th align="left">a</th><th align="right">b</th></tr>\n</thead><tbody>\n<tr><td align="left">1</td><td align="right">2</td></tr>\n</tbody></table>', "html"],
+            ["table, no outer pipes",      "a | b\n--- | ---\n1 | 2",
+                                            "<table>\n<thead>\n<tr><th>a</th><th>b</th></tr>\n</thead><tbody>\n<tr><td>1</td><td>2</td></tr>\n</tbody></table>", "html"],
+            ["table, escaped pipe",        "| a\\|b | c |\n| --- | --- |\n| 1 | 2 |",
+                                            "<table>\n<thead>\n<tr><th>a|b</th><th>c</th></tr>\n</thead><tbody>\n<tr><td>1</td><td>2</td></tr>\n</tbody></table>", "html"],
+            ["table, inline inside cell",  "| col |\n| --- |\n| **bold** |",
+                                            "<table>\n<thead>\n<tr><th>col</th></tr>\n</thead><tbody>\n<tr><td><strong>bold</strong></td></tr>\n</tbody></table>", "html"],
+            ["table, then paragraph",      "| a |\n| --- |\n| 1 |\n\nlast",
+                                            "<table>\n<thead>\n<tr><th>a</th></tr>\n</thead><tbody>\n<tr><td>1</td></tr>\n</tbody></table>\n<p>last</p>", "html"],
+            ["table, plain text",          "| a | b |\n| --- | --- |\n| 1 | 2 |", "a | b\n1 | 2", "text"],
+            ["table, ansi",                "| a | b |\n| --- | --- |\n| 1 | 2 |", "a | b\n1 | 2", "ansi"],
+            ["table, md round-trip",       "| a | b |\n| --- | --- |\n| 1 | 2 |",
+                                            "| a | b |\n|  ---  |  ---  |\n| 1 | 2 |", "markdown"],
+            ["pipes without a ruler",      "a | b\nc | d", "<p>a | b\nc | d</p>", "html"],
+
             // --- other renderers ---
             ["markdown round-trip",     "# md-format\n\nHey **bold** and *italic*.\n\n- [x] done\n- [ ] todo",
                                         "# md-format\n\nHey **bold** and *italic*.\n\n- [x] done\n- [ ] todo", "markdown"],

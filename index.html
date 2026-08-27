@@ -5,33 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>md-format — markdown live preview</title>
 
-    <!-- apply the saved theme BEFORE paint so there's no white flash -->
+    <!-- apply the saved theme BEFORE paint so there's no white flash.
+         the editor's palette is stored by the library (key "mdedit:theme"),
+         so this guard reads the SAME knob the page chrome uses. -->
     <script>
         (function () {
-            const saved = localStorage.getItem("mdformat-theme");
-            if (saved === "light") document.documentElement.setAttribute("data-theme", "light");
+            const saved = localStorage.getItem("mdedit:theme");
+            if (saved && saved !== "" && saved !== "light" && saved !== "green") {
+                document.documentElement.setAttribute("data-theme", "dark");
+            }
         })();
     </script>
 
+    <!-- the editor is a library now: this page only styles its own chrome —
+         the header, the segmented picker, the pills and the footer. Every
+         editor style (panes, toolbar, preview, themes) ships in mdeditor.css
+         so the same component drops into any other page as-is. -->
+    <link rel="stylesheet" href="./mdeditor.css">
     <style>
-        /* ============================================================
-         * THEME — everything is CSS variables so "dark mode" is just
-         * flipping the [data-theme] attribute on <html>.
-         * ============================================================ */
         :root {
-            color-scheme: dark;     /* native widgets (scrollbars, checkboxes…)
-                                     * follow the theme instead of the OS */
-            --bg: #0b0f0c;          /* page background            */
-            --panel: #101612;       /* header / side panels       */
-            --panel2: #151d17;      /* slightly lighter panels    */
+            color-scheme: dark;
+            --bg: #0b0f0c;
+            --panel: #101612;
+            --panel2: #151d17;
             --border: #1d2a20;
             --text: #e8f5ee;
             --muted: #7f9b8d;
-            --accent: #4cff9a;      /* the signature green        */
+            --accent: #4cff9a;
             --accent-dim: #2fa265;
-            --code-bg: #0a0f0b;
             --link: #5fb8ff;
-            --strike: #9aa;
         }
         [data-theme="light"] {
             color-scheme: light;
@@ -43,9 +45,7 @@
             --muted: #5f7568;
             --accent: #0c8a4d;
             --accent-dim: #0c8a4d;
-            --code-bg: #f0f2ec;
             --link: #0b5bb5;
-            --strike: #6b7a6b;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -56,17 +56,11 @@
             color: var(--text);
             font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
             height: 100vh;
-            /* the window itself NEVER scrolls — the editor and preview are the
-             * two scroll regions. Without this the body grows to the tallest
-             * pane and you get one long page (which is exactly why sync-scroll
-             * appeared to "do nothing": a pane that's as tall as its content
-             * has no scrollTop to read). */
             overflow: hidden;
             display: flex;
             flex-direction: column;
         }
 
-        /* ---- header: title left, controls right ------------------ */
         header {
             display: flex;
             align-items: center;
@@ -106,7 +100,6 @@
         .check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); cursor: pointer; user-select: none; }
         .check input { accent-color: var(--accent); }
 
-        /* ---- view-mode segmented control (split / md / preview) ------- */
         .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
         .seg-btn {
             background: none;
@@ -122,183 +115,10 @@
         .seg-btn:hover { color: var(--text); }
         .seg-btn.active { color: var(--accent); background: rgba(76,255,154,0.10); }
 
-        /* ---- the split layout ------------------------------------
-         * `.pane` gets flex: 1 1 0 → the split starts TRUE 50/50 and grows the
-         * same way the window does. The divider only ever changes the RATIO
-         * (also as a flex-basis percentage), never an absolute pixel width, so
-         * resizing the window keeps proportions instead of fighting them. */
+        /* the editor's home: stretches over whatever's left of the page. The
+         * library builds its two panes inside and manages their split. */
         .layout { display: flex; flex: 1; min-height: 0; }
-        .gone { display: none !important; }   /* for the whole-view modes */
-        .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1 1 0; overflow: hidden; }
 
-        /* ---- the formatting toolbar: sits between header and panes,
-         * every button edits the SOURCE (driving both panes). The bar is just
-         * a flex row that wraps on narrow windows; buttons are transparent by
-         * default and gain a soft panel hover so they read as tools, not as
-         * form fields. Styled with the live theme vars like everything else. */
-        .bar {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            flex-wrap: wrap;
-            padding: 8px 14px;
-            border-bottom: 1px solid var(--border);
-            background: var(--panel);
-        }
-        .bar .sep { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
-        .tbtn {
-            font: inherit;
-            font-size: 0.78rem;
-            line-height: 1;
-            min-width: 30px;
-            height: 28px;
-            padding: 0 9px;
-            border: 1px solid transparent;
-            border-radius: 6px;
-            background: none;
-            color: var(--muted);
-            cursor: pointer;
-            transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-        }
-        .tbtn:hover { color: var(--text); background: var(--panel2); border-color: var(--border); }
-        .tbtn:active { background: rgba(76,255,154,0.10); color: var(--accent); }
-        .tbtn b { font-weight: 700; }
-        .tbtn s { text-decoration: line-through; }
-
-        /* ---- the editor ------------------------------------------ */
-        #editor {
-            flex: 1;
-            min-height: 0;      /* allow the textarea to shrink below its content
-                                 * height, so IT scrolls instead of the page */
-            width: 100%;
-            resize: none;
-            border: 0;
-            outline: none;
-            background: var(--bg);
-            color: var(--text);
-            font-family: "Fira Code", ui-monospace, "Cascadia Code", Consolas, monospace;
-            font-size: 13.5px;
-            line-height: 1.6;
-            padding: 16px 18px;
-            tab-size: 4;
-        }
-        #editor::selection { background: rgba(76,255,154,0.25); }
-
-        /* scrollbars belong to the theme, not the OS: thin, quiet, only loud
-         * when you hover them. The preview gets the same treatment below. */
-        #editor { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-        #editor::-webkit-scrollbar { width: 10px; height: 10px; }
-        #editor::-webkit-scrollbar-thumb {
-            background: var(--border);
-            border-radius: 999px;
-            border: 3px solid transparent;
-            background-clip: padding-box;
-        }
-        #editor::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
-        #editor::-webkit-scrollbar-corner { background: transparent; }
-
-        /* ---- the draggable divider -------------------------------- */
-        #divider {
-            width: 6px;
-            cursor: col-resize;
-            background: var(--panel);
-            border-left: 1px solid var(--border);
-            border-right: 1px solid var(--border);
-            flex-shrink: 0;
-            transition: background 0.15s ease;
-        }
-        #divider:hover, #divider.dragging { background: var(--accent-dim); }
-
-        /* ---- the preview ------------------------------------------ */
-        #preview-scroll {
-            flex: 1;
-            min-height: 0;      /* non-negotiable: with the default `auto`
-                                 * min-height a flex child refuses to shrink
-                                 * below its content, growing the page again */
-            overflow-y: auto;
-            overflow-x: hidden; /* content should never force a sideways bar */
-            padding: 16px 26px 48px;
-            background: var(--bg);
-            scrollbar-width: thin;
-            scrollbar-color: var(--border) transparent;
-        }
-        /* the preview is contenteditable: when you click into it the browser
-         * paints a loud focus ring that clashes with the quiet editor — kill it
-         * and paint the caret in the accent instead */
-        #preview-scroll:focus { outline: none; }
-        #preview-scroll:focus .md { outline: none; }
-        #preview-scroll { caret-color: var(--accent); }
-        #preview-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-        #preview-scroll::-webkit-scrollbar-thumb {
-            background: var(--border);
-            border-radius: 999px;
-            border: 3px solid transparent;
-            background-clip: padding-box;
-        }
-        #preview-scroll::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
-        #preview-scroll::-webkit-scrollbar-corner { background: transparent; }
-        #preview-scroll pre.source {
-            font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-break: break-word;
-            color: var(--text);
-            background: var(--code-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 14px;
-        }
-        #preview-scroll pre.source.ansi { white-space: pre-wrap; }
-
-        /* styled rendering of the html output lives in .md — a tiny
-         * "github-markdown-lite" written in the repo's palette. Full-width:
-         * in an editor the document owns the pane, it doesn't sit in a column. */
-        .md { font-size: 15px; line-height: 1.7; color: var(--text); }
-        .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
-            font-weight: 700; color: var(--text); margin: 1.5em 0 0.6em; line-height: 1.25;
-        }
-        .md h1 { font-size: 2.0em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
-        .md h2 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
-        .md h3 { font-size: 1.3em; }
-        .md h4 { font-size: 1.1em; }
-        .md p { margin: 0.7em 0; }
-        .md a { color: var(--link); text-decoration: none; }
-        .md a:hover { text-decoration: underline; }
-        .md del { color: var(--strike); }
-        .md code {
-            font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-            font-size: 0.88em;
-            background: var(--panel2);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-            padding: 0.12em 0.35em;
-        }
-        .md pre {
-            background: var(--code-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 14px;
-            overflow-x: auto;
-            margin: 0.9em 0;
-        }
-        .md pre code { background: none; border: 0; padding: 0; font-size: 0.88em; }
-        .md blockquote {
-            border-left: 3px solid var(--accent-dim);
-            background: var(--panel);
-            border-radius: 0 8px 8px 0;
-            margin: 0.9em 0;
-            padding: 0.5em 1.1em;
-            color: var(--muted);
-        }
-        .md ul, .md ol { padding-left: 1.6em; margin: 0.7em 0; }
-        .md li { margin: 0.25em 0; }
-        .md li > ul, .md li > ol { margin: 0.15em 0; }
-        .md li input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.4em; vertical-align: -1px; }
-        .md hr { border: 0; border-top: 2px solid var(--border); margin: 1.6em 0; }
-        .md img { max-width: 100%; border-radius: 8px; }
-
-        /* ---- status bar -------------------------------------------- */
         footer {
             display: flex;
             gap: 16px;
@@ -315,7 +135,7 @@
 </head>
 <body>
 
-    <!-- ================= header: the toolbar ================= -->
+    <!-- ================= header ================= -->
     <header>
         <h1><span class="dash">md</span>-format <span style="color:var(--muted)">// markdown live preview</span></h1>
         <div class="actions">
@@ -340,47 +160,10 @@
         </div>
     </header>
 
-    <!-- ================= formatting toolbar =================
-         Every button is a plain <button class="tbtn" data-tool="...">.
-         The data-tool is ALL the JS needs to know: the click handler maps
-         it straight into a markdown edit (see formatText), and B/italic/
-         strike use the actual formatting tag <b>/<i>/<s> so the button
-         already LOOKS like what it does. Grouped into little clusters with
-         <span class="sep"> dividers: inline marks | headings | blocks. -->
-    <div class="bar" id="toolbar">
-        <button class="tbtn" data-tool="bold" title="Bold (select text first)"><b>B</b></button>
-        <button class="tbtn" data-tool="italic" title="Italic"><i>I</i></button>
-        <button class="tbtn" data-tool="strike" title="Strikethrough"><s>S</s></button>
-        <button class="tbtn" data-tool="code" title="Inline code"><code>&lt;/&gt;</code></button>
-        <span class="sep"></span>
-        <button class="tbtn" data-tool="h1" title="Heading 1">H1</button>
-        <button class="tbtn" data-tool="h2" title="Heading 2">H2</button>
-        <button class="tbtn" data-tool="h3" title="Heading 3">H3</button>
-        <span class="sep"></span>
-        <button class="tbtn" data-tool="quote" title="Blockquote">Quotation</button>
-        <button class="tbtn" data-tool="ul" title="Bullet list">&#8226; List</button>
-        <button class="tbtn" data-tool="ol" title="Numbered list">1. List</button>
-        <button class="tbtn" data-tool="task" title="Task checkbox">[ ] Task</button>
-        <span class="sep"></span>
-        <button class="tbtn" data-tool="link" title="Link">Link</button>
-        <button class="tbtn" data-tool="img" title="Image">Image</button>
-        <button class="tbtn" data-tool="codeblock" title="Fenced code block">&lt;/&gt; block</button>
-        <button class="tbtn" data-tool="hr" title="Horizontal rule">&#8212;</button>
-    </div>
-
-    <!-- ================= split layout ================= -->
-<div class="layout">
-        <div class="pane" id="editorPane">
-            <textarea id="editor" placeholder="markdown" spellcheck="false"></textarea>
-        </div>
-
-        <!-- draggable splitter between the two panes -->
-        <div id="divider"></div>
-
-        <div class="pane" id="previewPane">
-            <div id="preview-scroll"></div>
-        </div>
-    </div>
+    <!-- ================= the editor =================
+         One empty div. The library builds its own toolbar, panes, divider and
+         preview here (see mdeditor.js) — the demo does not own any of it. -->
+    <div class="layout" id="app"></div>
 
     <!-- ================= status bar ================= -->
     <footer>
@@ -393,303 +176,65 @@
 
     <!-- ================= the app ================= -->
     <script type="module">
-        // build our own pipeline: parser + renderers live in sibling files so
-        // the demo is thin — it just feeds text in and draws the result.
-        import { parse } from "./mdparser.js";
-        import { render } from "./renderers.js";
-        import { domToMarkdown } from "./domtomd.js";
+        // the demo is a THIN host now: it draws its own chrome and asks the
+        // library for everything the editor does. All the stateful machinery
+        // (rendering, WYSIWYG, toolbar, splitter, sync scroll, theming) lives
+        // in mdeditor.js behind the createEditor() factory.
+        import { createEditor } from "./mdeditor.js";
 
-        /* ---- grab the DOM bits we'll need ---- */
-        const editor      = document.getElementById("editor");
-        const editorPane  = document.getElementById("editorPane");
-        const preview     = document.getElementById("preview-scroll");
-        const previewPane = document.getElementById("previewPane");
-        const viewSeg     = document.getElementById("viewSeg");
-        const divider     = document.getElementById("divider");
-        const outputSel   = document.getElementById("outputSel");
-        const resetBtn    = document.getElementById("resetBtn");
-        const copyBtn     = document.getElementById("copyBtn");
-        const exportBtn   = document.getElementById("exportBtn");
-        const syncCheck   = document.getElementById("syncScroll");
-        const themeToggle = document.getElementById("themeToggle");
-        const toolbarBar  = document.getElementById("toolbar"); // "toolbar" alone is a real
-                                                                  // window API (window.toolbar),
-                                                                  // so alias it to avoid GIL
-                                                                  // shadowing the element in a module
-        const statChars   = document.getElementById("statChars");
-        const statBlocks  = document.getElementById("statBlocks");
-        const statTime    = document.getElementById("statTime");
-        const footerDot   = document.querySelector("footer .dot");
+        /* ---- sample document — exercises every feature we support, tabs
+         *      included so the preview has a real table to draw ---- */
+        const SAMPLE = `# md-format\n\nHey **bold**, *italic*, \`inline code\`, ~~strikethrough~~, and a [link](https://example.com "with a title").\n\n> Quote block. CommonMark has a rule about "lazy continuation", we just keep it simple.\n\n| Feature | Status |\n| --- | --- |\n| **tables** | inline code \`works\` |\n| wysiwyg | [link](https://example.com "again") |\n\n1. ordered list\n2. second item\n   - nested bullet\n   - \`inner code\`\n\n- [x] done task\n- [ ] open task\n\n\`\`\`js\nconst greet = name => \`hey \${name}\`;\nconsole.log(greet("world"));\n\`\`\`\n\nAuto-links work too — visit https://aigsniperyt.github.io for the whole catalogue.\n\n---\n\n*italics via **bold inside italics**.*`.trim();
 
-        /* ---- sample document — exercises every feature we support ---- */
-        const SAMPLE = `# md-format\n\nHey **bold**, *italic*, \`inline code\`, ~~strikethrough~~, and a [link](https://example.com "with a title").\n\n> Quote block. CommonMark has a rule about "lazy continuation", we just keep it simple.\n\n1. ordered list\n2. second item\n   - nested bullet\n   - \`inner code\`\n\n- [x] done task\n- [ ] open task\n\n\`\`\`js\nconst greet = name => \`hey \${name}\`;\nconsole.log(greet("world"));\n\`\`\`\n\nAuto-links work too — visit https://aigsniperyt.github.io for the whole catalogue.\n\n---\n\n*italics via **bold inside italics**.*`.trim();
-
-        /* ---- theming ---- */
-        const savedTheme = localStorage.getItem("mdformat-theme") || "dark";
-        document.documentElement.setAttribute("data-theme", savedTheme);
-        themeToggle.checked = savedTheme === "dark";
-        themeToggle.addEventListener("change", () => {
-            const dark = themeToggle.checked;
-            document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-            localStorage.setItem("mdformat-theme", dark ? "dark" : "light");
+        /* ---- the ONE editor instance ---- */
+        const app = document.getElementById("app");
+        const ed = createEditor(app, {
+            value: SAMPLE,
+            onChange: () => { /* demo doesn't persist — the library keeps view,
+                               * split and theme, the content stays local */ },
         });
 
-        /* ---- whole-view modes: split everything, markdown only, preview only ----
-         * Persisted, because "open up in preview mode and type" is a real
-         * workflow — coming back to the same state matters. */
-        const VIEW_STORE = "mdformat-view";
-        let view = localStorage.getItem(VIEW_STORE) || "split";
-        const rootForMd = () => preview.querySelector(".md") || preview;
+        // handy alias the self-test below leans on; `editor`/`preview` are the
+        // library's own textarea and preview-scroll elements.
+        const { editor, preview, editorPane, previewPane, toolbarBar } = ed;
+        const rootForMd = () => ed.preview.querySelector(".md") || ed.preview;
 
-        function applyView() {
-            const mdOnly = view === "md", pvOnly = view === "preview";
-            editorPane.classList.toggle("gone", pvOnly);
-            previewPane.classList.toggle("gone", mdOnly);
-            divider.style.display = mdOnly || pvOnly ? "none" : "";
+        /* ---- view-mode segmented control ---- */
+        const viewSeg = document.getElementById("viewSeg");
+        function pickView(v) {
+            ed.setView(v);
             for (const btn of viewSeg.querySelectorAll(".seg-btn")) {
-                btn.classList.toggle("active", btn.dataset.view === view);
+                btn.classList.toggle("active", btn.dataset.view === v);
             }
-            if (view !== "md") editor.focus();
-            refresh();   // toggle the editing surface + caret handling
+            (v === "preview" ? ed.preview : ed.editor).focus();
         }
         viewSeg.addEventListener("click", (e) => {
             const btn = e.target.closest(".seg-btn");
             if (!btn) return;
-            view = btn.dataset.view;
-            localStorage.setItem(VIEW_STORE, view);
-            applyView();
-            (view === "preview" ? preview : editor).focus();
+            pickView(btn.dataset.view);
         });
         window.addEventListener("keydown", (e) => {
             if ((e.metaKey || e.ctrlKey) && ["1", "2", "3"].includes(e.key)) {
                 e.preventDefault();
-                view = ["split", "md", "preview"][+e.key - 1];
-                localStorage.setItem(VIEW_STORE, view);
-                applyView();
+                pickView(["split", "md", "preview"][+e.key - 1]);
             }
         });
+        pickView(ed.getView());   // colour the button that matches the saved view
 
-        /* ---- escaping for the "source" views ---- */
-        const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        /* ---- tools: reset / copy / export / output type ---- */
+        const resetBtn = document.getElementById("resetBtn");
+        const copyBtn = document.getElementById("copyBtn");
+        const exportBtn = document.getElementById("exportBtn");
+        const outputSel = document.getElementById("outputSel");
+        const syncCheck = document.getElementById("syncScroll");
+        const themeToggle = document.getElementById("themeToggle");
 
-        /* ---- is the preview currently an editable surface? (html output only) ---- */
-        let wysiwyg = false;
+        resetBtn.addEventListener("click", () => ed.setMarkdown(SAMPLE));
+        outputSel.addEventListener("change", () => ed.setOutput(outputSel.value));
 
-        /* ---- the one render function powering every output mode ----
-         * refresh(srcOverride?) — normally reads editor.value, but WYSIWYG
-         * passes tokenised markdown so the caret markers exist in the DOM. */
-        function refresh(srcOverride) {
-            try {
-                const src = srcOverride != null ? srcOverride : editor.value;
-                const t0 = performance.now();
-
-                // parse once, render however the select says
-                const ast = parse(src);
-                const type = outputSel.value;
-
-                // html "preview" is the pretty one; everything else is a <pre>
-                switch (type) {
-                    case "html": {
-                        const html = render(ast, "html");
-                        // wrapped in .md so the preview styles (below) apply
-                        preview.innerHTML = `<div class="md">${html}</div>`;
-                        preview.removeAttribute("data-raw");
-                        // THE WYSIWYG switch: in html mode the preview is an
-                        // editing surface (unless we're in md-only view).
-                        wysiwyg = view !== "md";
-                        preview.contentEditable = wysiwyg ? "true" : "false";
-                        // typing/flipping a task box means the checkbox must be
-                        // clickable — the renderer emits `disabled`, undo that
-                        for (const cb of preview.querySelectorAll('input[type="checkbox"]')) {
-                            cb.disabled = false;
-                        }
-                        break;
-                    }
-                    case "htmlsrc":
-                    case "text":
-                    case "ansi":
-                    case "markdown": {
-                        wysiwyg = false;
-                        preview.contentEditable = "false";
-                        let out = render(ast, type);
-                        if (type === "ansi") {
-                            // make the invisible ESC control-char visible as text,
-                            // and highlight it so the codes are legible
-                            out = out.replace(/\u001b/g, "\u241B");   // swap real ESC bytes for a visible "␛"
-                            out = out.replace(/␛\[/g, "&#92;x1b[");
-                        }
-                        preview.innerHTML = `<pre class="source ansi">${esc(out)}</pre>`;
-                        preview.setAttribute("data-raw", "1");
-                        break;
-                    }
-                    case "ast": {
-                        wysiwyg = false;
-                        preview.contentEditable = "false";
-                        // the tree itself — education mode
-                        const json = JSON.stringify(ast, null, 2);
-                        preview.innerHTML = `<pre class="source">${esc(json)}</pre>`;
-                        preview.setAttribute("data-raw", "1");
-                        break;
-                    }
-                }
-
-                const ms = performance.now() - t0;
-                statChars.textContent = `${src.length.toLocaleString()} chars`;
-                statBlocks.textContent = `${ast.children.length} top-level blocks`;
-                statTime.textContent = `${ms.toFixed(1)} ms`;
-                footerDot.textContent = "●";
-                footerDot.style.color = "var(--accent)";
-            } catch (err) {
-                // don't let a parse error nuke the page — show it instead
-                preview.innerHTML = `<pre class="source" style="color:#ff6b6b">${esc(String(err && err.stack || err))}</pre>`;
-                footerDot.textContent = "●";
-                footerDot.style.color = "#ff6b6b";
-            }
-        }
-
-        /* ---- WYSIWYG: bidirectional writing through the rendered preview ----------
-         * The preview is contenteditable, so the user types into REAL html.
-         * Each edit we: (1) capture the caret as a stable DOM PATH (chain of
-         * child-indexes down into the .md tree — never text tokens, so nothing
-         * can ever leak into the source), (2) walk the whole preview back to
-         * markdown, (3) write CLEAN markdown into the source editor, (4) re-render
-         * the preview from that clean source, (5) re-walk the path in the NEW dom
-         * to park the caret exactly where the user left it. The source editor is
-         * authoritative: preview edits become source edits, and source edits
-         * still drive the preview. Both directions, permanently in sync. */
-
-        /* snap the caret into a {path, offset, context} — path is the list of
-         * child indexes from #preview-scroll-.md down to the caret text node;
-         * context is a prefix of that node's text, used as a fallback anchor if
-         * the path shifts after re-render. */
-        function saveCaretPath(container) {
-            const sel = window.getSelection();
-            if (!sel.rangeCount) return null;
-            const node = sel.focusNode;
-            if (!node || !container.contains(node)) return null;
-            const off = sel.focusOffset;
-            if (node.nodeType !== Node.TEXT_NODE) return null;   // keep it simple: text carets only
-            const path = [];
-            let n = node;
-            while (n && n !== container) {
-                path.unshift(Array.from(n.parentNode.childNodes).indexOf(n));
-                n = n.parentNode;
-            }
-            if (n !== container) return null;
-            return { path, off, len: node.data.length, context: node.data.slice(0, 160) };
-        }
-
-        /* find the text node the path points at in a FRESH dom; if the tree has
-         * changed shape (e.g. an Enter key split a paragraph) fall back to
-         * hunting for a node whose text still CONTAINS the captured window. */
-        function locateTextNode(container, path) {
-            let node = container;
-            for (const idx of path) {
-                const kids = node.childNodes;
-                if (idx < kids.length) node = kids[idx];
-                else return null;
-            }
-            return node.nodeType === Node.TEXT_NODE ? node : null;
-        }
-
-        function restoreCaretPath(container, state) {
-            if (!state) return;
-            let node = locateTextNode(container, state.path);
-            if (!node) {
-                // structure moved under us — find the survivor whose text
-                // matches, else give up quietly (typing continues, caret only
-                // lands at the document end)
-                const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-                let n;
-                while ((n = walker.nextNode())) {
-                    if (state.context && n.data.startsWith(state.context.slice(0, 40))) { node = n; break; }
-                }
-                if (!node) return;
-            }
-            const off = Math.min(state.off, node.data.length);
-            const range = document.createRange();
-            range.setStart(node, off);
-            range.collapse(true);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            preview.focus({ preventScroll: true });   // never yank the viewport
-        }
-
-        /* the full round trip for one preview edit */
-        let wysiwygTimer = null;
-        function wysiwygSync() {
-            const caret = saveCaretPath(rootForMd());   // capture BEFORE serialize
-            let md;
-            try { md = domToMarkdown(rootForMd()); }
-            catch (err) { return; }
-
-            if (md !== editor.value) {
-                // heal any self-links a pre-fix round trip already minted:
-                // `[https://x.y](https://x.y)` → plain `https://x.y`
-                md = md.replace(/\[((?:https?:\/\/|www\.)[^\s\]\\]+)\]\(\1(?:\s*"[^"]*")?\)/g, "$1");
-                const keptScroll = preview.scrollTop;   // the preview is a lens:
-                editor.value = md;                      // clean source, no tokens
-                refresh();                              // re-render from clean source
-                preview.scrollTop = Math.min(keptScroll, preview.scrollHeight - preview.clientHeight);
-                restoreCaretPath(rootForMd(), caret);   // caret home
-            }
-            // when nothing material changed, the browser's own selection IS the
-            // caret — nothing to do.
-        }
-        const scheduleWysiwyg = () => {
-            clearTimeout(wysiwygTimer);
-            wysiwygTimer = setTimeout(wysiwygSync, 120);
-        };
-        preview.addEventListener("input", () => {
-            if (wysiwyg) scheduleWysiwyg();
-        });
-
-        /* clicking a task checkbox edits the DOM; fold that back to source too.
-         * We deliberately do NOT intercept the toggle — in a contenteditable a
-         * checkbox's native flip isn't reliably preventable with preventDefault,
-         * and fighting it causes a double-flip that undoes itself. The correct
-         * move is to let the browser change the box, then FOLD the now-current
-         * state back into the source via the 'change' event it fires after. */
-        preview.addEventListener("change", (e) => {
-            if (!wysiwyg) return;
-            if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") {
-                scheduleWysiwyg();
-            }
-        });
-
-        /* Cmd/Ctrl+click a link in the preview opens it in a new tab. A plain
-         * click still moves the caret — the preview is an editing surface, so
-         * opening links requires the "I actually want to go" modifier. */
-        preview.addEventListener("mousedown", (e) => {
-            if (!(e.metaKey || e.ctrlKey)) return;
-            if (e.target.closest("a")) e.preventDefault();   // no caret, just open
-        });
-        preview.addEventListener("click", (e) => {
-            if (!(e.metaKey || e.ctrlKey)) return;
-            const a = e.target.closest("a");
-            if (!a) return;
-            e.preventDefault();
-            window.open(a.getAttribute("href") || a.href, "_blank", "noopener");
-        });
-
-        /* ---- live re-render with a tiny debounce (keeps typing smooth) ---- */
-        let refreshTimer = null;
-        const scheduleRefresh = () => {
-            clearTimeout(refreshTimer);
-            refreshTimer = setTimeout(refresh, 120);
-        };
-        editor.addEventListener("input", scheduleRefresh);
-        outputSel.addEventListener("change", refresh);
-
-        /* ---- Reset: put the sample back ---- */
-        resetBtn.addEventListener("click", () => { editor.value = SAMPLE; refresh(); });
-
-        /* ---- Copy: current output to the clipboard ---- */
         copyBtn.addEventListener("click", async () => {
             try {
-                const out = preview.textContent;   // works for every mode
-                await navigator.clipboard.writeText(out);
+                await navigator.clipboard.writeText(preview.textContent);
                 copyBtn.textContent = "Copied!";
                 setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
             } catch (err) {
@@ -697,306 +242,46 @@
             }
         });
 
-        /* ---- Export: download the current output as a file ---- */
         const EXT = { html: "html", htmlsrc: "html", text: "txt", ansi: "txt", markdown: "md", ast: "json" };
         exportBtn.addEventListener("click", () => {
-            const type = outputSel.value;
             const blob = new Blob([preview.textContent], { type: "text/plain" });
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
-            a.download = `md-format-output.${EXT[type]}`;
+            a.download = `md-format-output.${EXT[outputSel.value]}`;
             a.click();
             URL.revokeObjectURL(a.href);
         });
 
-        /* ---- sync scroll: mirror editor scroll onto preview (and back) ---- */
-        /* Both panes have their own scrollbar. Setting `to.scrollTop` fires a
-         * scroll event on `to` — if we blindly mirror that back, we get an
-         * infinite ping-pong. The trick: latch "we're mid-mirror", swallow the
-         * very next scroll event, and expire the latch after 150ms so a lost
-         * echo event can never wedge sync forever. */
-        let syncingFrom = null;
-        let syncingTimer = null;
-        function scrollSync(from, to) {
-            if (!syncCheck.checked || syncingFrom) return;
-            syncingFrom = from;
-            clearTimeout(syncingTimer);
-            syncingTimer = setTimeout(() => (syncingFrom = null), 150);
-            const travel = Math.max(1, from.scrollHeight - from.clientHeight);
-            const ratio = from.scrollTop / travel;
-            to.scrollTop = ratio * Math.max(0, to.scrollHeight - to.clientHeight);
+        /* ---- sync-scroll checkbox drives the library's flag ---- */
+        syncCheck.checked = ed.syncEnabled;
+        syncCheck.addEventListener("change", () => ed.setSyncScroll(syncCheck.checked));
+
+        /* ---- theme toggle: the demo chrome and the editor palette flip
+         *      together. "Dark mode" = the green palette (or night owl if you
+         *      type ed.setTheme("nightowl") in the console). ---- */
+        function applyChrome(themeName) {
+            const dark = themeName && themeName !== "light";
+            document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+            themeToggle.checked = dark;
         }
-        editor.addEventListener("scroll", () => {
-            if (syncingFrom) { syncingFrom = null; return; }   // echo of our own write
-            scrollSync(editor, preview);
+        themeToggle.addEventListener("change", () => {
+            const t = themeToggle.checked ? "green" : "light";
+            ed.setTheme(t);
+            applyChrome(t);
         });
-        preview.addEventListener("scroll", () => {
-            if (syncingFrom) { syncingFrom = null; return; }   // echo of our own write
-            scrollSync(preview, editor);
+        applyChrome(ed.getTheme());
+
+        /* ---- live stats for the footer ---- */
+        const statChars = document.getElementById("statChars");
+        const statBlocks = document.getElementById("statBlocks");
+        const statTime = document.getElementById("statTime");
+        const footerDot = document.querySelector("footer .dot");
+        ed.onRender((s) => {
+            statChars.textContent = `${s.chars.toLocaleString()} chars`;
+            statBlocks.textContent = `${s.blocks} top-level blocks`;
+            statTime.textContent = `${s.ms.toFixed(1)} ms`;
+            footerDot.style.color = s.error ? "#ff6b6b" : "var(--accent)";
         });
-
-        /* ---- Tab in the editor inserts two spaces instead of jumping ---- */
-        editor.addEventListener("keydown", (e) => {
-            if (e.key === "Tab") {
-                e.preventDefault();
-                const start = editor.selectionStart, end = editor.selectionEnd;
-                editor.value = editor.value.slice(0, start) + "  " + editor.value.slice(end);
-                editor.selectionStart = editor.selectionEnd = start + 2;
-                refresh();
-            }
-        });
-
-        /* ---- formatting toolbar: every button edits the SOURCE ----------
-         * The source editor is authoritative (both panes render from it), so a
-         * toolbar press always rewrites editor.value and refreshes. The tricky
-         * part is figuring WHERE to apply it when the caret lives in the
-         * WYSIWYG preview: we park two private-use sentinel characters at the
-         * selection, serialize the DOM to markdown (the sentinels ride along),
-         * read their positions in the md, then STRIP them before writing — so
-         * the md is clean and the sentinels vanish the moment the preview
-         * re-renders. No scanner can ever collide with `\uE000`/`\uE002`. */
-        toolbarBar.addEventListener("mousedown", (e) => e.preventDefault());   // keep focus (caret) where it is
-        toolbarBar.addEventListener("click", (e) => {
-            const btn = e.target.closest(".tbtn");
-            if (!btn) return;
-            e.preventDefault();
-            applyTool(btn.dataset.tool);
-        });
-
-        /* parkSent: drop a private-use sentinel character INTO the live DOM at
-         * a caret/selection edge. We don't disturb the browser's own selection
-         * — we just make sure that when the DOM gets serialized to markdown,
-         * the sentinel lands in the string at the exact index the caret pointed
-         * to. `\uE000`/`\uE002` are private-use, nobody types them, so the
-         * scanner can never trip on one. We split the text node at the offset
-         * so the sentinel is truly BETWEEN characters, and insert it before the
-         * node (offset 0) or after it (offset === length). */
-        function parkSent(node, off, ch) {
-            const m = document.createTextNode(ch);
-            if (node.nodeType === Node.TEXT_NODE) {
-                if (off > 0 && off < node.length) {
-                    const rest = node.splitText(off);
-                    node.parentNode.insertBefore(m, rest);
-                } else if (off === 0) {
-                    node.parentNode.insertBefore(m, node);
-                } else {
-                    node.parentNode.insertBefore(m, node.nextSibling);
-                }
-            } else {
-                node.insertBefore(m, node.childNodes[off] || null);
-            }
-        }
-
-        /* wrapInline: bold / italic / strike / inline-code all share this. It
-         * wraps the selection with a marker pair, and pressing the SAME button
-         * again UNWRAPS it instead of double-wrapping — so a toolbar press is
-         * always a toggle. With NO selection (just a caret) it inserts the
-         * markers with the caret parked between them, ready to type the word.
-         * Returns { text, s, e } describing the new source + where the caret
-         * should end up — applyTool uses e to place a collapsed caret (see the
-         * "don't leave a highlight" note down in applyTool). */
-        function wrapInline(src, s, e, pre, post) {
-            const sel = src.slice(s, e);
-            if (s === e) {                        // no selection → place caret in markers
-                const text = src.slice(0, s) + pre + post + src.slice(e);
-                const at = s + pre.length;
-                return { text, s: at, e: at };
-            }
-            const isWrapped = src.slice(Math.max(0, s - pre.length), s) === pre &&
-                              src.slice(e, e + post.length) === post;
-            if (isWrapped) {                      // press again → unwrap
-                const text = src.slice(0, s - pre.length) + sel + src.slice(e + post.length);
-                return { text, s: s - pre.length, e: e - pre.length };
-            }
-            const text = src.slice(0, s) + pre + sel + post + src.slice(e);
-            return { text, s, e: e + pre.length + post.length };
-        }
-
-        /* linePrefix: headings, quotes and lists are PREFIX markers, not wraps.
-         * We take the whole line(s) the selection touches, toggle the prefix on
-         * every line (if the line already has it, strip it — same toggle logic
-         * as wrapInline), and splice the line back. Handles a multi-line
-         * selection across several paragraphs by splitting on \n. */
-        function linePrefix(text, s, e, prefix) {
-            const ls = text.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
-            const nl = text.indexOf("\n", e);
-            const le = nl < 0 ? text.length : nl;
-            const out = text.slice(ls, le).split("\n")
-                .map(l => l.startsWith(prefix) ? l.slice(prefix.length) : prefix + l)
-                .join("\n");
-            return { text: text.slice(0, ls) + out + text.slice(le), s: ls, e: ls + out.length };
-        }
-
-        /* formatText: the only place a toolbar request knows about markdown
-         * syntax. Every case reduces to "wrap a span" (bold/italic/...),
-         * "prefix some lines" (headings/lists/quotes) or "dump a block in"
-         * (link/img/codeblock/hr). Returns null only when the user cancels a
-         * prompt — applyTool bails out without touching the source. */
-        function formatText(src, s, e, tool) {
-            const sel = src.slice(s, e);
-            switch (tool) {
-                case "bold":   return wrapInline(src, s, e, "**", "**");
-                case "italic": return wrapInline(src, s, e, "*", "*");
-                case "strike": return wrapInline(src, s, e, "~~", "~~");
-                case "code":   return wrapInline(src, s, e, "`", "`");
-                case "link": {
-                    const url = prompt("Link URL", "https://");
-                    if (!url) return null;
-                    const md = `[${sel || "text"}](${url})`;
-                    return { text: src.slice(0, s) + md + src.slice(e), s: s + md.length, e: s + md.length };
-                }
-                case "img": {
-                    const url = prompt("Image URL", "https://");
-                    if (!url) return null;
-                    const md = `![${sel || "alt"}](${url})`;
-                    return { text: src.slice(0, s) + md + src.slice(e), s: s + md.length, e: s + md.length };
-                }
-                case "h1": return linePrefix(src, s, e, "# ");
-                case "h2": return linePrefix(src, s, e, "## ");
-                case "h3": return linePrefix(src, s, e, "### ");
-                case "quote": return linePrefix(src, s, e, "> ");
-                case "ul": return linePrefix(src, s, e, "- ");
-                case "ol": return linePrefix(src, s, e, "1. ");
-                case "task": return linePrefix(src, s, e, "- [ ] ");
-                case "codeblock": {
-                    const ls = src.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
-                    const nl = src.indexOf("\n", e);
-                    const le = nl < 0 ? src.length : nl;
-                    const md = "```\n" + src.slice(ls, le) + "\n```";
-                    const text = src.slice(0, ls) + md + src.slice(le);
-                    return { text, s: ls + md.length, e: ls + md.length };
-                }
-                case "hr": {
-                    const md = "\n\n---\n\n";
-                    const text = src.slice(0, s) + md + src.slice(e);
-                    const at = s + md.length;
-                    return { text, s: at, e: at };
-                }
-            }
-            return { text: src, s, e };
-        }
-
-        /* restoreByContext: put the caret back after the source changed.
-         * applyTool captured a "fingerprint" (the first 140 chars of the text
-         * node the caret was in + the offset) BEFORE xre-rendering. The old
-         * idea — search one text node for the needle — is brittle because a
-         * bold wrap SPLITS the text across the new <strong> (…</strong>nede…),
-         * so the needle never matches one node. Instead we glue ALL the text
-         * nodes together, find the needle in the whole string, then walk the
-         * node list to convert that character offset back into (node, offset).
-         * If the fingerprint is gone entirely (a brutal edit moved everything)
-         * we just leave the caret alone rather than teleport it somewhere
-         * wrong. */
-        function restoreByContext(container, ctx) {
-            if (!ctx) return;
-            const needle = ctx.text.slice(0, 28);
-            const parts = [];
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-            let n;
-            while ((n = walker.nextNode())) parts.push({ n, t: n.data });
-            if (!parts.length) return;
-            const joined = parts.map(p => p.t).join("");
-            const i = joined.indexOf(needle);
-            if (i < 0) return;                 // page changed too hard — let it be
-            let pos = Math.min(i + ctx.off, joined.length - 1);
-            let acc = 0, k = 0;
-            while (k < parts.length && acc + parts[k].t.length <= pos) { acc += parts[k].t.length; k++; }
-            const node = parts[Math.min(k, parts.length - 1)].n;
-            const o = Math.min(pos - acc, node.data.length);
-            const range = document.createRange();
-            range.setStart(node, o); range.collapse(true);
-            const sel = window.getSelection();
-            sel.removeAllRanges(); sel.addRange(range);
-        }
-
-        /* applyTool: the one shared entry point for every toolbar button.
-         * The tricky part is KNOWING WHERE THE EDIT MEANS. If the caret lives
-         * in the live preview we have to park sentinel tokens at the selection,
-         * fold the DOM back to markdown, and let the markdown offsets describe
-         * the target region — the DOM and the source never share coordinates,
-         * so the sentinels are the only bridge. If the caret is in the textarea
-         * we can skip all that and use selectionStart/End directly. */
-        function applyTool(tool) {
-            const caretInPreview = wysiwyg && preview.contains(document.activeElement);
-            let src, s, e, ctx = null;
-            if (caretInPreview) {
-                const sel = window.getSelection();
-                if (!sel.rangeCount) return;
-                const r = sel.getRangeAt(0);
-                if (!rootForMd().contains(r.startContainer)) return;
-                if (sel.focusNode && sel.focusNode.nodeType === Node.TEXT_NODE) {
-                    // grab a fingerprint of what's under the caret BEFORE we
-                    // nuke the DOM — restoreByContext hunts for it afterwards
-                    ctx = { text: sel.focusNode.data.slice(0, 140), off: sel.focusOffset };
-                }
-                parkSent(r.startContainer, r.startOffset, "\uE000");
-                parkSent(r.endContainer, r.endOffset, "\uE002");
-                const md = domToMarkdown(rootForMd());
-                let a = md.indexOf("\uE000");
-                let b = md.indexOf("\uE002");
-                src = md.replace(/[\uE000\uE002]/g, "");
-                if (a < 0) a = 0;
-                if (b < 0) b = src.length;
-                if (a > b) { const t = a; a = b; b = t; }   // backwards selection
-                // a and b point AT the sentinel positions in `md`. The opening
-                // sentinel sits where the source selection starts (a), but the
-                // CLOSING one sits immediately AFTER the selection — so the
-                // real end in the stripped source is b - 1, not b. Get this
-                // wrong and every wrap swallows one extra character.
-                s = a;
-                e = Math.max(a, b - 1);
-            } else {
-                src = editor.value;
-                s = editor.selectionStart ?? 0;
-                e = editor.selectionEnd ?? 0;
-                ctx = { text: src.slice(Math.max(0, s - 70), s + 70), off: 70 };
-            }
-            const out = formatText(src, s, e, tool);
-            if (!out) return;   // user cancelled a prompt
-            editor.value = out.text;
-            if (caretInPreview) {
-                refresh();                    // re-render from the formatted source
-                preview.focus({ preventScroll: true });
-                restoreByContext(rootForMd(), ctx);
-            } else {
-                editor.focus();
-                // IMPORTANT: collapse the caret to the END of the formatted span.
-                // Re-selecting the span would leave it highlighted, and the next
-                // keystroke would REPLACE that highlight — nuking the format and
-                // the original text we just wrapped. A collapsed caret lets you
-                // keep typing straight after, nothing to overwrite.
-                const at = Math.min(out.e, out.text.length);
-                editor.setSelectionRange(at, at);
-                refresh();
-            }
-        }
-
-        /* ---- draggable splitter: changes a RATIO, never an absolute size.
-         * `flex-basis%` is relative, so after a window resize the split keeps
-         * its proportion — the panes are a lens, not bolted to the window. */
-        const SPLIT_STORE = "mdformat-split";
-        let splitRatio = parseFloat(localStorage.getItem(SPLIT_STORE)) || 0.5;
-        const applySplit = () => { editorPane.style.flex = `0 0 ${(splitRatio * 100).toFixed(1)}%`; };
-
-        let dragging = false;
-        divider.addEventListener("mousedown", () => { dragging = true; divider.classList.add("dragging"); });
-        window.addEventListener("mousemove", (e) => {
-            if (!dragging) return;
-            const rect = document.querySelector(".layout").getBoundingClientRect();
-            splitRatio = Math.min(0.85, Math.max(0.15, (e.clientX - rect.left) / rect.width));
-            applySplit();
-        });
-        window.addEventListener("mouseup", () => {
-            if (!dragging) return;
-            dragging = false;
-            divider.classList.remove("dragging");
-            localStorage.setItem(SPLIT_STORE, String(splitRatio));
-        });
-
-        /* ---- go ---- */
-        editor.value = SAMPLE;
-        applySplit();   // restore the saved split ratio
-        applyView();    // boots the stored view mode AND does the first render
 
         /* ---- guarded layout self-test -----------------------------------
          * open the page as .../index.html?selftest and a #selftest div is
@@ -1022,6 +307,7 @@ if (new URLSearchParams(location.search).has("selftest")) {
                 try {
                 // 1) editor scroll at 40% -> preview mirrors it (and back at 80%)
                 syncCheck.checked = true;
+                ed.syncEnabled = true;
                 editor.scrollTop = Math.round(totalE * 0.4);
                 editor.dispatchEvent(new Event("scroll"));
                 await wait(40);
@@ -1053,8 +339,18 @@ if (new URLSearchParams(location.search).has("selftest")) {
                     edited = true;
                 }
                 result.wysiwygBackWrite = edited && editor.value.includes("PRE ");
+                result.wysiwygSourceClean =
+                    editor.value.includes("\uE000") || editor.value.includes("\uE002") ? 0 : 1;
                 result.previewLeftovers =
                     preview.textContent.includes("\u200b") ? 0 : 1;   // zero-width = leaked caret junk
+
+                // 3b) the TABLE in the sample must survive the same round trip
+                //     with its pipes and pipes with pipes intact (tables fold
+                //     back to markdown like every block does), and its cells
+                //     must still render live in the preview.
+                result.tableHeaders = rootForMd().querySelectorAll("th").length;
+                result.tableRendered = rootForMd().querySelector("table") ? 1 : 0;
+                result.tablePipes = editor.value.split("|").length > 4 ? 1 : 0;
 
                 // 4) task checkbox click -> source flips the unchecked item to [x]
                 const countEx = (hay) => (hay.match(/https:\/\/example\.com/g) || []).length;

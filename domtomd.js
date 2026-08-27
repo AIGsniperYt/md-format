@@ -100,6 +100,12 @@ function mdListItem(li, depth, num) {
 
         for (const line of piece.split("\n")) {
             if (!placedMarker) {
+                /* an EMPTY first block must never own the marker line —
+                 * contenteditable loves injecting a bare <div>/<p> into a task
+                 * item on toggle/edit, and that pushed the real text onto an
+                 * indented new line ("- [x]\n  open task") instead of the
+                 * canonical single line ("- [x] open task"). Skip it. */
+                if (!line.trim()) continue;
                 lines.push(indent + marker + task + line);
                 placedMarker = true;
             } else {
@@ -139,6 +145,12 @@ function mdInline(node) {
             const href = node.getAttribute("href") || "";
             const title = node.getAttribute("title");
             const label = mdInlineChildren(node) || href;
+            /* a bare URL in the source comes out of the renderer as
+             * <a href="https://x.y">https://x.y</a>. Writing that back as
+             * [https://x.y](https://x.y) would DOUBLE the URL on every round
+             * trip — any interaction in the editor would "duplicate links".
+             * If the label IS the href, write it back as a plain URL. */
+            if (label === href && !title && /^(https?:|www\.)/i.test(href)) return label;
             return `[${label}](${href}${title ? ` "${title}"` : ""})`;
         }
         case "img": {

@@ -19,6 +19,8 @@
          * flipping the [data-theme] attribute on <html>.
          * ============================================================ */
         :root {
+            color-scheme: dark;     /* native widgets (scrollbars, checkboxes…)
+                                     * follow the theme instead of the OS */
             --bg: #0b0f0c;          /* page background            */
             --panel: #101612;       /* header / side panels       */
             --panel2: #151d17;      /* slightly lighter panels    */
@@ -32,6 +34,7 @@
             --strike: #9aa;
         }
         [data-theme="light"] {
+            color-scheme: light;
             --bg: #f7f8f5;
             --panel: #ffffff;
             --panel2: #f0f2ec;
@@ -119,23 +122,14 @@
         .seg-btn:hover { color: var(--text); }
         .seg-btn.active { color: var(--accent); background: rgba(76,255,154,0.10); }
 
-        /* ---- the split layout ------------------------------------ */
+        /* ---- the split layout ------------------------------------
+         * `.pane` gets flex: 1 1 0 → the split starts TRUE 50/50 and grows the
+         * same way the window does. The divider only ever changes the RATIO
+         * (also as a flex-basis percentage), never an absolute pixel width, so
+         * resizing the window keeps proportions instead of fighting them. */
         .layout { display: flex; flex: 1; min-height: 0; }
         .gone { display: none !important; }   /* for the whole-view modes */
-        .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-        .pane-label {
-            padding: 7px 16px;
-            font-size: 0.68rem;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            color: var(--muted);
-            border-bottom: 1px solid var(--border);
-            background: var(--panel);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .pane-label .hint { letter-spacing: 0; text-transform: none; }
+        .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1 1 0; overflow: hidden; }
 
         /* ---- the editor ------------------------------------------ */
         #editor {
@@ -156,6 +150,19 @@
         }
         #editor::selection { background: rgba(76,255,154,0.25); }
 
+        /* scrollbars belong to the theme, not the OS: thin, quiet, only loud
+         * when you hover them. The preview gets the same treatment below. */
+        #editor { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+        #editor::-webkit-scrollbar { width: 10px; height: 10px; }
+        #editor::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 999px;
+            border: 3px solid transparent;
+            background-clip: padding-box;
+        }
+        #editor::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+        #editor::-webkit-scrollbar-corner { background: transparent; }
+
         /* ---- the draggable divider -------------------------------- */
         #divider {
             width: 6px;
@@ -175,9 +182,27 @@
                                  * min-height a flex child refuses to shrink
                                  * below its content, growing the page again */
             overflow-y: auto;
-            padding: 16px 22px 40px;
+            overflow-x: hidden; /* content should never force a sideways bar */
+            padding: 16px 26px 48px;
             background: var(--bg);
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
         }
+        /* the preview is contenteditable: when you click into it the browser
+         * paints a loud focus ring that clashes with the quiet editor — kill it
+         * and paint the caret in the accent instead */
+        #preview-scroll:focus { outline: none; }
+        #preview-scroll:focus .md { outline: none; }
+        #preview-scroll { caret-color: var(--accent); }
+        #preview-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+        #preview-scroll::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 999px;
+            border: 3px solid transparent;
+            background-clip: padding-box;
+        }
+        #preview-scroll::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+        #preview-scroll::-webkit-scrollbar-corner { background: transparent; }
         #preview-scroll pre.source {
             font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
             font-size: 13px;
@@ -192,9 +217,10 @@
         }
         #preview-scroll pre.source.ansi { white-space: pre-wrap; }
 
-        /* styled rendering of the html output lives in .md — this is a
-         * tiny "github-markdown-lite" written in the repo's palette */
-        .md { font-size: 15px; line-height: 1.7; color: var(--text); max-width: 780px; }
+        /* styled rendering of the html output lives in .md — a tiny
+         * "github-markdown-lite" written in the repo's palette. Full-width:
+         * in an editor the document owns the pane, it doesn't sit in a column. */
+        .md { font-size: 15px; line-height: 1.7; color: var(--text); }
         .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
             font-weight: 700; color: var(--text); margin: 1.5em 0 0.6em; line-height: 1.25;
         }
@@ -281,17 +307,15 @@
     </header>
 
     <!-- ================= split layout ================= -->
-    <div class="layout">
+<div class="layout">
         <div class="pane" id="editorPane">
-            <div class="pane-label" id="editorLabel">Editor <span class="hint">paste that AI text</span></div>
-            <textarea id="editor" spellcheck="false"></textarea>
+            <textarea id="editor" placeholder="markdown" spellcheck="false"></textarea>
         </div>
 
         <!-- draggable splitter between the two panes -->
         <div id="divider"></div>
 
         <div class="pane" id="previewPane">
-            <div class="pane-label" id="previewLabel">HTML preview</div>
             <div id="preview-scroll"></div>
         </div>
     </div>
@@ -316,10 +340,8 @@
         /* ---- grab the DOM bits we'll need ---- */
         const editor      = document.getElementById("editor");
         const editorPane  = document.getElementById("editorPane");
-        const editorLabel = document.getElementById("editorLabel");
         const preview     = document.getElementById("preview-scroll");
         const previewPane = document.getElementById("previewPane");
-        const previewLabel = document.getElementById("previewLabel");
         const viewSeg     = document.getElementById("viewSeg");
         const divider     = document.getElementById("divider");
         const outputSel   = document.getElementById("outputSel");
@@ -361,8 +383,7 @@
             for (const btn of viewSeg.querySelectorAll(".seg-btn")) {
                 btn.classList.toggle("active", btn.dataset.view === view);
             }
-            editorLabel.querySelector(".hint").textContent =
-                mdOnly ? "markdown only — full screen" : "paste that AI text";
+            if (view !== "md") editor.focus();
             refresh();   // toggle the editing surface + caret handling
         }
         viewSeg.addEventListener("click", (e) => {
@@ -446,8 +467,6 @@
                     }
                 }
 
-                previewLabel.textContent = outputSel.options[outputSel.selectedIndex].text;
-
                 const ms = performance.now() - t0;
                 statChars.textContent = `${src.length.toLocaleString()} chars`;
                 statBlocks.textContent = `${ast.children.length} top-level blocks`;
@@ -464,114 +483,93 @@
 
         /* ---- WYSIWYG: bidirectional writing through the rendered preview ----------
          * The preview is contenteditable, so the user types into REAL html.
-         * Each edit we: (1) park hard-to-find caret markers in the original
-         * DOM, (2) walk the whole preview back to markdown, (3) write CLEAN
-         * markdown into the source editor (markers stripped), (4) re-render the
-         * preview FROM the tokenised markdown so the caret markers come back as
-         * ordinary text, (5) walk those tokens home — placing the caret exactly
-         * where the user left it — and strip them. The source editor is
+         * Each edit we: (1) capture the caret as a stable DOM PATH (chain of
+         * child-indexes down into the .md tree — never text tokens, so nothing
+         * can ever leak into the source), (2) walk the whole preview back to
+         * markdown, (3) write CLEAN markdown into the source editor, (4) re-render
+         * the preview from that clean source, (5) re-walk the path in the NEW dom
+         * to park the caret exactly where the user left it. The source editor is
          * authoritative: preview edits become source edits, and source edits
          * still drive the preview. Both directions, permanently in sync. */
-        const MARK = (id) => `\u200b\u200bSEL_${id}\u200b\u200b`;
-        const TOKEN_RE = /\u200b\u200bSEL_START\u200b\u200b|\u200b\u200bSEL_END\u200b\u200b/g;
 
-        function saveSelection(container) {
+        /* snap the caret into a {path, offset, context} — path is the list of
+         * child indexes from #preview-scroll-.md down to the caret text node;
+         * context is a prefix of that node's text, used as a fallback anchor if
+         * the path shifts after re-render. */
+        function saveCaretPath(container) {
             const sel = window.getSelection();
-            if (!sel.rangeCount || !container.contains(sel.anchorNode)) return;
-            const range = sel.getRangeAt(0);
+            if (!sel.rangeCount) return null;
+            const node = sel.focusNode;
+            if (!node || !container.contains(node)) return null;
+            const off = sel.focusOffset;
+            if (node.nodeType !== Node.TEXT_NODE) return null;   // keep it simple: text carets only
+            const path = [];
+            let n = node;
+            while (n && n !== container) {
+                path.unshift(Array.from(n.parentNode.childNodes).indexOf(n));
+                n = n.parentNode;
+            }
+            if (n !== container) return null;
+            return { path, off, len: node.data.length, context: node.data.slice(0, 160) };
+        }
 
-            // remember where the selection ENDS *before* we start inserting
-            // markers, so the earlier insertions can't shift the later one
-            const endNode = range.endContainer, endOff = range.endOffset;
-            const makeSpan = (id) => {
-                const s = document.createElement("span");
-                s.dataset.k = "SEL_" + id;
-                s.textContent = MARK(id);
-                return s;
-            };
-            const park = (node, offset, id) => {
-                const m = makeSpan(id);
-                if (node.nodeType === Node.TEXT_NODE) {
-                    if (offset > 0 && offset < node.length) {
-                        const rest = node.splitText(offset);
-                        node.parentNode.insertBefore(m, rest);
-                    } else if (offset === 0) {
-                        node.parentNode.insertBefore(m, node);
-                    } else {
-                        node.parentNode.insertBefore(m, node.nextSibling);
-                    }
-                } else {
-                    node.insertBefore(m, node.childNodes[offset] || null);
+        /* find the text node the path points at in a FRESH dom; if the tree has
+         * changed shape (e.g. an Enter key split a paragraph) fall back to
+         * hunting for a node whose text still CONTAINS the captured window. */
+        function locateTextNode(container, path) {
+            let node = container;
+            for (const idx of path) {
+                const kids = node.childNodes;
+                if (idx < kids.length) node = kids[idx];
+                else return null;
+            }
+            return node.nodeType === Node.TEXT_NODE ? node : null;
+        }
+
+        function restoreCaretPath(container, state) {
+            if (!state) return;
+            let node = locateTextNode(container, state.path);
+            if (!node) {
+                // structure moved under us — find the survivor whose text
+                // matches, else give up quietly (typing continues, caret only
+                // lands at the document end)
+                const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+                let n;
+                while ((n = walker.nextNode())) {
+                    if (state.context && n.data.startsWith(state.context.slice(0, 40))) { node = n; break; }
                 }
-            };
-            park(range.startContainer, range.startOffset, "START");
-            park(endNode, endOff, "END");
-        }
-
-        /* find a marker as plain TEXT anywhere in the rendered preview (it may
-         * live in a paragraph, a code block or a link — that's why we search
-         * text nodes, not elements) */
-        function locateToken(container, id) {
-            const needle = MARK(id);
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-            let n;
-            while ((n = walker.nextNode())) {
-                const i = n.data.indexOf(needle);
-                if (i >= 0) return { node: n, index: i };
+                if (!node) return;
             }
-            return null;
-        }
-
-        /* walk the caret markers home: place the selection between the START
-         * and END tokens, then remove the token characters from the DOM (and
-         * drop any now-empty marker spans the browser kept around) */
-        function restoreMarkers(container) {
-            const a = locateToken(container, "START");
-            if (!a) return;
-            const alen = MARK("START").length;
-            a.node.replaceData(a.index, alen, "");
-
-            const b = locateToken(container, "END");
+            const off = Math.min(state.off, node.data.length);
             const range = document.createRange();
-            if (b) {
-                const blen = MARK("END").length;
-                const bIndex = b.index;
-                b.node.replaceData(bIndex, blen, "");
-                range.setStart(a.node, a.index);
-                range.setEnd(b.node, bIndex);
-                dropEmptySpan(b.node);
-            } else {
-                range.setStart(a.node, a.index);
-                range.collapse(true);
-            }
-            dropEmptySpan(a.node);
-
+            range.setStart(node, off);
+            range.collapse(true);
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            preview.focus();
-
-            function dropEmptySpan(node) {
-                const p = node.parentNode;
-                if (p && p.tagName === "SPAN" && !p.textContent) p.remove();
-            }
+            preview.focus({ preventScroll: true });   // never yank the viewport
         }
 
         /* the full round trip for one preview edit */
         let wysiwygTimer = null;
         function wysiwygSync() {
-            saveSelection(rootForMd());            // markers into the live DOM
+            const caret = saveCaretPath(rootForMd());   // capture BEFORE serialize
             let md;
             try { md = domToMarkdown(rootForMd()); }
             catch (err) { return; }
 
             if (md !== editor.value) {
-                editor.value = md.replace(TOKEN_RE, "");   // clean source
-                refresh(md);                              // markers re-render as text
-                restoreMarkers(rootForMd());              // caret home + strip
-            } else {
-                restoreMarkers(rootForMd());              // nothing changed, unmark
+                // heal any self-links a pre-fix round trip already minted:
+                // `[https://x.y](https://x.y)` → plain `https://x.y`
+                md = md.replace(/\[((?:https?:\/\/|www\.)[^\s\]\\]+)\]\(\1(?:\s*"[^"]*")?\)/g, "$1");
+                const keptScroll = preview.scrollTop;   // the preview is a lens:
+                editor.value = md;                      // clean source, no tokens
+                refresh();                              // re-render from clean source
+                preview.scrollTop = Math.min(keptScroll, preview.scrollHeight - preview.clientHeight);
+                restoreCaretPath(rootForMd(), caret);   // caret home
             }
+            // when nothing material changed, the browser's own selection IS the
+            // caret — nothing to do.
         }
         const scheduleWysiwyg = () => {
             clearTimeout(wysiwygTimer);
@@ -592,6 +590,21 @@
             if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") {
                 scheduleWysiwyg();
             }
+        });
+
+        /* Cmd/Ctrl+click a link in the preview opens it in a new tab. A plain
+         * click still moves the caret — the preview is an editing surface, so
+         * opening links requires the "I actually want to go" modifier. */
+        preview.addEventListener("mousedown", (e) => {
+            if (!(e.metaKey || e.ctrlKey)) return;
+            if (e.target.closest("a")) e.preventDefault();   // no caret, just open
+        });
+        preview.addEventListener("click", (e) => {
+            if (!(e.metaKey || e.ctrlKey)) return;
+            const a = e.target.closest("a");
+            if (!a) return;
+            e.preventDefault();
+            window.open(a.getAttribute("href") || a.href, "_blank", "noopener");
         });
 
         /* ---- live re-render with a tiny debounce (keeps typing smooth) ---- */
@@ -667,21 +680,32 @@
             }
         });
 
-        /* ---- draggable splitter ---------------------------------------- */
+        /* ---- draggable splitter: changes a RATIO, never an absolute size.
+         * `flex-basis%` is relative, so after a window resize the split keeps
+         * its proportion — the panes are a lens, not bolted to the window. */
+        const SPLIT_STORE = "mdformat-split";
+        let splitRatio = parseFloat(localStorage.getItem(SPLIT_STORE)) || 0.5;
+        const applySplit = () => { editorPane.style.flex = `0 0 ${(splitRatio * 100).toFixed(1)}%`; };
+
         let dragging = false;
         divider.addEventListener("mousedown", () => { dragging = true; divider.classList.add("dragging"); });
         window.addEventListener("mousemove", (e) => {
             if (!dragging) return;
             const rect = document.querySelector(".layout").getBoundingClientRect();
-            const rel = (e.clientX - rect.left) / rect.width;         // 0..1
-            const clamped = Math.min(0.85, Math.max(0.15, rel));
-            editor.parentElement.style.flex = `0 0 ${clamped * 100}%`;
+            splitRatio = Math.min(0.85, Math.max(0.15, (e.clientX - rect.left) / rect.width));
+            applySplit();
         });
-        window.addEventListener("mouseup", () => { dragging = false; divider.classList.remove("dragging"); });
+        window.addEventListener("mouseup", () => {
+            if (!dragging) return;
+            dragging = false;
+            divider.classList.remove("dragging");
+            localStorage.setItem(SPLIT_STORE, String(splitRatio));
+        });
 
         /* ---- go ---- */
         editor.value = SAMPLE;
-        applyView();   // boots the stored view mode AND does the first render
+        applySplit();   // restore the saved split ratio
+        applyView();    // boots the stored view mode AND does the first render
 
         /* ---- guarded layout self-test -----------------------------------
          * open the page as .../index.html?selftest and a #selftest div is
@@ -736,19 +760,102 @@ if (new URLSearchParams(location.search).has("selftest")) {
                 }
                 result.wysiwygBackWrite = edited && editor.value.includes("PRE ");
                 result.previewLeftovers =
-                    preview.querySelector('span[data-k^="SEL_"]') ? 0 : 1;
+                    preview.textContent.includes("\u200b") ? 0 : 1;   // zero-width = leaked caret junk
 
                 // 4) task checkbox click -> source flips the unchecked item to [x]
+                const countEx = (hay) => (hay.match(/https:\/\/example\.com/g) || []).length;
+                const countAu = (hay) => (hay.match(/aigsniperyt\.github\.io/g) || []).length;
                 const box = rootForMd().querySelector('input[type="checkbox"]:not(:checked)');
                 if (box) { box.click(); await wait(300); }
                 result.taskToggleToSource = /\[x\] open task/.test(editor.value);
                 result.checkedBoxesNow = preview.querySelectorAll('input[type="checkbox"]:checked').length;
+                // the bare-URL regression: the round trip must NOT double the
+                // source's auto-linked URL (a click anywhere re-serialises it)
+                result.exAfterCheckbox = countEx(editor.value);
+                result.autoAfterCheckbox = countAu(editor.value);
+                // task-item line shape: the item text must stay on the SAME
+                // line as the checkbox marker, not wrap onto an indented line
+                const taskSrcLines = () => editor.value.split("\n").filter(l => /[\n]?\[[x ]\]/.test(l));
+                result.taskSrc1 = taskSrcLines().join(" || ");
+                const openTaskLi = () => [...rootForMd().querySelectorAll("li")]
+                    .find(li => li.textContent.includes("open task"));
+                result.taskLiHTML = openTaskLi() ? openTaskLi().outerHTML.slice(0, 200) : "none";
+                // browser restructure repro: contenteditable injects an empty
+                // block into the item — the item text must STAY on the marker
+                // line instead of wrapping onto an indented new line
+                const taskLi = openTaskLi();
+                if (taskLi) {
+                    taskLi.insertBefore(document.createElement("div"), taskLi.querySelector("p") || null);
+                    preview.dispatchEvent(new Event("input", { bubbles: true }));
+                    await wait(300);
+                }
+                result.taskSrcAfterEmpty = taskSrcLines().join(" || ");
 
                 // 5) edit the SOURCE -> preview still follows (existing path)
                 editor.value += "\n\nTAIL999";
                 editor.dispatchEvent(new Event("input"));
                 await wait(300);
                 result.sourceToPreview = rootForMd().textContent.includes("TAIL999");
+
+                // 6) typing THROUGH the WYSIWYG lens: the anchor must survive
+                //    round trips (no duplicate links), the caret must land back
+                //    inside the link, no marker text leaks, and the preview's
+                //    scroll must stay put — the pane is a lens, not a teleport.
+                const linkURL = "https://example.com";
+                const anchorNow = () => {
+                    const a = rootForMd().querySelector(`a[href="${linkURL}"]`);
+                    return a ? 1 : 0;
+                };
+                const typeNearLink = async (offset) => {
+                    const a = rootForMd().querySelector(`a[href="${linkURL}"]`);
+                    if (!a || !a.firstChild) return false;
+                    const tn = a.firstChild;
+                    const o = Math.min(offset, tn.length);
+                    const r = document.createRange();
+                    r.setStart(tn, o); r.collapse(true);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges(); sel.addRange(r);
+                    tn.insertData(o, "Z");
+                    preview.dispatchEvent(new Event("input", { bubbles: true }));
+                    await wait(350);
+                    return true;
+                };
+                preview.scrollTop = Math.min(preview.scrollHeight, 120);
+                const scrollBefore = preview.scrollTop;
+                for (const off of [0, 4, 1, 9]) await typeNearLink(off);
+                result.linkSourceOccurrences = editor.value.split(linkURL).length - 1;
+                result.linkDomAnchors = anchorNow();
+                result.autoAfterTyping = countAu(editor.value);
+                result.tokenLeak =
+                    /SEL_START|SEL_END|\u200b/.test(editor.value + preview.textContent) ? 0 : 1;
+                const postSel = window.getSelection();
+                result.caretInsideLink = postSel.rangeCount && (
+                    postSel.anchorNode.nodeType === Node.TEXT_NODE &&
+                    postSel.anchorNode.parentNode &&
+                    postSel.anchorNode.parentNode.tagName === "A"
+                ) ? 1 : 0;
+                result.previewScrollKept = Math.abs(preview.scrollTop - scrollBefore) < 12 ? 1 : 0;
+
+                // 7) Enter inside the preview: splits the paragraph, the source
+                //    gains a newline, and the caret survives INSIDE a <p> (the
+                //    old marker bug left it at #document → the "jump to top" bug)
+                const tp = rootForMd().querySelector("p");
+                const ttn = tp && tp.firstChild;
+                if (ttn && ttn.nodeType === Node.TEXT_NODE && ttn.length > 3) {
+                    const er = document.createRange();
+                    er.setStart(ttn, 2); er.collapse(true);
+                    const esel = window.getSelection();
+                    esel.removeAllRanges(); esel.addRange(er);
+                    preview.focus({ preventScroll: true });
+                    document.execCommand("insertParagraph", false);
+                    preview.dispatchEvent(new Event("input", { bubbles: true }));
+                    await wait(350);
+                    const s2 = window.getSelection();
+                    result.enterSplitP = rootForMd().querySelectorAll("p").length > 1 ? 1 : 0;
+                    result.enterNewlineInSource = editor.value.split("\n").length > (SAMPLE.split("\n").length) ? 1 : 0;
+                    result.enterCaretNode = s2.rangeCount && s2.anchorNode ?
+                        (s2.anchorNode.nodeType === Node.TEXT_NODE ? s2.anchorNode.parentNode.tagName : s2.anchorNode.nodeName) : "none";
+                }
 
                 probe.textContent = JSON.stringify(result);
                 document.body.appendChild(probe);

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>md-format — test harness</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0b0f0c;
+            color: #e8f5ee;
+            font-family: "Fira Code", ui-monospace, "Cascadia Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 { font-size: 1.1rem; margin-bottom: 4px; color: #4cff9a; }
+        p.sub { color: #7f9b8d; font-size: 0.78rem; margin-bottom: 18px; }
+        #summary {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 999px;
+            border: 1px solid #1d2a20;
+            margin-bottom: 18px;
+            font-size: 0.82rem;
+        }
+        #summary.ok { border-color: #2fa265; color: #4cff9a; background: #101612; }
+        #summary.fail { border-color: #a24b4b; color: #ff7b7b; background: #161010; }
+        .row {
+            display: grid;
+            grid-template-columns: 26px 220px 1fr;
+            gap: 10px;
+            padding: 8px 10px;
+            border-bottom: 1px solid #16211a;
+            align-items: start;
+        }
+        .row:last-child { border-bottom: 0; }
+        .mark { font-size: 0.9rem; }
+        .mark.pass { color: #4cff9a; }
+        .mark.fail { color: #ff7b7b; }
+        .name { color: #7f9b8d; word-break: break-word; }
+        .case { min-width: 0; }
+        .case .src { color: #a8c9b6; white-space: pre-wrap; word-break: break-word; margin-bottom: 4px; }
+        .case .got { color: #e8f5ee; white-space: pre-wrap; word-break: break-word; }
+        .case .wanted { color: #7f9b8d; white-space: pre-wrap; word-break: break-word; }
+        .case .cmp { color: #ff7b7b; font-size: 0.72rem; margin-bottom: 2px; }
+        code { background: #101612; border: 1px solid #1d2a20; padding: 0 4px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>md-format — test harness</h1>
+    <p class="sub">locks in the parser/renderer behaviours so a refactor can't silently break them. <code>python3 -m http.server</code> then open this file.</p>
+    <div id="summary">running…</div>
+    <div id="results"></div>
+
+    <script type="module">
+        // the harness pulls the REAL parser and renderers (no testing mocks —
+        // that would defeat the point). Each case feeds markdown in and checks
+        // the output string against an expected value, byte for byte.
+        import { parse } from "./mdparser.js";
+        import { format } from "./renderers.js";
+
+        // case = [name, markdown input, expected output, output type]
+        const cases = [
+            // --- block parsing ---
+            ["heading",                 "# hi",                                   "<h1>hi</h1>", "html"],
+            ["heading, no space (#hi)", "#hi",                                   "<h1>hi</h1>", "html"],  // forgiving for AI text
+            ["heading, trailing hash",  "## Big ##",                             "<h2>Big</h2>", "html"],
+            ["setext heading",          "Title\n=====",                          "<h1>Title</h1>", "html"],
+            ["escaping in paragraph",   "a < b & c > d",                         "<p>a &lt; b &amp; c &gt; d</p>", "html"],
+            ["horizontal rule",         "---",                                   "<hr>", "html"],
+            ["fenced code block",       "```js\nconst x = 1;\n```",               '<pre><code class="language-js">const x = 1;</code></pre>', "html"],
+            ["indented code block",     "    const x = 1;",                      "<pre><code>const x = 1;</code></pre>", "html"],
+            ["blockquote",              "> a\n> b",                              "<blockquote>\n<p>a\nb</p>\n</blockquote>", "html"],
+            ["unordered list",          "- a\n- b",                              "<ul>\n<li><p>a</p></li>\n<li><p>b</p></li>\n</ul>", "html"],
+            ["ordered list",            "1. a\n2. b",                            "<ol>\n<li><p>a</p></li>\n<li><p>b</p></li>\n</ol>", "html"],
+            ["nested list",             "- a\n  - sub\n- b",                     "<ul>\n<li><p>a</p>\n<ul>\n<li><p>sub</p></li>\n</ul></li>\n<li><p>b</p></li>\n</ul>", "html"],
+            ["task, done",              "- [x] done",                            '<ul>\n<li><input type="checkbox" disabled checked> <p>done</p></li>\n</ul>', "html"],
+            ["task, open",              "- [ ] todo",                            '<ul>\n<li><input type="checkbox" disabled> <p>todo</p></li>\n</ul>', "html"],
+
+            // --- inline parsing ---
+            ["strong",                  "**b**",                                 "<p><strong>b</strong></p>", "html"],
+            ["emphasis",                "*i*",                                   "<p><em>i</em></p>", "html"],
+            ["strong + em (3 stars)",   "***both at once***",                    "<p><strong><em>both at once</em></strong></p>", "html"],
+            ["parallel nesting",        "*italics via **bold inside italics**.*",  "<p><em>italics via <strong>bold inside italics</strong>.</em></p>", "html"],
+            ["parallel nesting, rev",   "**bold with *italic inside***",          "<p><strong>bold with <em>italic inside</em></strong></p>", "html"],
+            ["strikethrough",           "~~s~~",                                 "<p><del>s</del></p>", "html"],
+            ["inline code",             "a `c` b",                               "<p>a <code>c</code> b</p>", "html"],
+            ["link",                    "[x](https://a.io)",                     '<p><a href="https://a.io">x</a></p>', "html"],
+            ["link with title",         '[x](https://a.io "title")',             '<p><a href="https://a.io" title="title">x</a></p>', "html"],
+            ["image",                   "![alt](img.png)",                       '<p><img src="img.png" alt="alt"></p>', "html"],
+            ["autolink",                "<https://a.io>",                        '<p><a href="https://a.io">https://a.io</a></p>', "html"],
+            ["bare url",                "see https://a.io.",                     '<p>see <a href="https://a.io">https://a.io</a></p>', "html"],
+            ["hard line break",         "a  \nb",                                "<p>a<br>\nb</p>", "html"],
+
+            // --- other renderers ---
+            ["markdown round-trip",     "# md-format\n\nHey **bold** and *italic*.\n\n- [x] done\n- [ ] todo",
+                                        "# md-format\n\nHey **bold** and *italic*.\n\n- [x] done\n- [ ] todo", "markdown"],
+            ["plain text",              "# md-format\n\nHey **bold** and *italic*.\n\n- [x] done\n- [ ] todo",
+                                        "md-format\n\nHey bold and italic.\n\n- [x] done\n- [ ] todo", "text"],
+        ];
+
+        // --- run every case and paint the verdicts ---
+        const results = document.getElementById("results");
+        const summary = document.getElementById("summary");
+        let passed = 0;
+
+        for (const [name, src, want, type] of cases) {
+            let got, failed = false;
+            try {
+                got = format(src, type);
+            } catch (err) {
+                got = "THREW: " + (err && err.message);
+            }
+            if (got !== want) failed = true;
+            if (!failed) passed++;
+
+            const row = document.createElement("div");
+            row.className = "row";
+            const cmp = failed ? "did not match expected output" : "exact match";
+
+            // keep long outputs readable
+            const short = s => s.length > 320 ? s.slice(0, 320) + "…" : s;
+
+            row.innerHTML = `
+                <span class="mark ${failed ? "fail" : "pass"}">${failed ? "✗" : "✓"}</span>
+                <span class="name">${esc(name)}<br><span style="color:#4cff9a;font-size:.72rem">${type}</span></span>
+                <span class="case">
+                    <div class="src">${failed ? "" : ""}md ▸ ${esc(src)}</div>
+                    ${failed ? `<div class="cmp">${cmp}</div>
+                    <div class="wanted">wanted: ${esc(short(want))}</div>
+                    <div class="got">got:      ${esc(short(got))}</div>` : `<div class="got">→ ${esc(short(got))}</div>`}
+                </span>`;
+            results.appendChild(row);
+        }
+
+        summary.textContent = `${passed} / ${cases.length} passed`;
+        summary.classList.add(passed === cases.length ? "ok" : "fail");
+
+        function esc(s) {
+            return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+    </script>
+</body>
+</html>

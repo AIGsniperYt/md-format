@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>md-format — markdown live preview</title>
+
+    <!-- apply the saved theme BEFORE paint so there's no white flash -->
+    <script>
+        (function () {
+            const saved = localStorage.getItem("mdformat-theme");
+            if (saved === "light") document.documentElement.setAttribute("data-theme", "light");
+        })();
+    </script>
+
+    <style>
+        /* ============================================================
+         * THEME — everything is CSS variables so "dark mode" is just
+         * flipping the [data-theme] attribute on <html>.
+         * ============================================================ */
+        :root {
+            --bg: #0b0f0c;          /* page background            */
+            --panel: #101612;       /* header / side panels       */
+            --panel2: #151d17;      /* slightly lighter panels    */
+            --border: #1d2a20;
+            --text: #e8f5ee;
+            --muted: #7f9b8d;
+            --accent: #4cff9a;      /* the signature green        */
+            --accent-dim: #2fa265;
+            --code-bg: #0a0f0b;
+            --link: #5fb8ff;
+            --strike: #9aa;
+        }
+        [data-theme="light"] {
+            --bg: #f7f8f5;
+            --panel: #ffffff;
+            --panel2: #f0f2ec;
+            --border: #d8ded2;
+            --text: #1e2a1e;
+            --muted: #5f7568;
+            --accent: #0c8a4d;
+            --accent-dim: #0c8a4d;
+            --code-bg: #f0f2ec;
+            --link: #0b5bb5;
+            --strike: #6b7a6b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ---- header: title left, controls right ------------------ */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            flex-wrap: wrap;
+        }
+        header h1 {
+            font-size: 1.02rem;
+            font-weight: 600;
+            font-family: monospace;
+            letter-spacing: 0.5px;
+        }
+        header h1 .dash { color: var(--accent); }
+        header .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .pill {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 0.78rem;
+            font-family: inherit;
+            padding: 6px 14px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .pill:hover { color: var(--accent); border-color: var(--accent-dim); }
+        .pill.primary { color: var(--accent); border-color: var(--accent-dim); }
+        .pill.primary:hover { background: rgba(76,255,154,0.08); }
+        select.pill { padding: 6px 10px; }
+        .check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); cursor: pointer; user-select: none; }
+        .check input { accent-color: var(--accent); }
+
+        /* ---- the split layout ------------------------------------ */
+        .layout { display: flex; flex: 1; min-height: 0; }
+        .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+        .pane-label {
+            padding: 7px 16px;
+            font-size: 0.68rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .pane-label .hint { letter-spacing: 0; text-transform: none; }
+
+        /* ---- the editor ------------------------------------------ */
+        #editor {
+            flex: 1;
+            width: 100%;
+            resize: none;
+            border: 0;
+            outline: none;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Fira Code", ui-monospace, "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+            line-height: 1.6;
+            padding: 16px 18px;
+            tab-size: 4;
+        }
+        #editor::selection { background: rgba(76,255,154,0.25); }
+
+        /* ---- the draggable divider -------------------------------- */
+        #divider {
+            width: 6px;
+            cursor: col-resize;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            flex-shrink: 0;
+            transition: background 0.15s ease;
+        }
+        #divider:hover, #divider.dragging { background: var(--accent-dim); }
+
+        /* ---- the preview ------------------------------------------ */
+        #preview-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 22px 40px;
+            background: var(--bg);
+        }
+        #preview-scroll pre.source {
+            font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+        }
+        #preview-scroll pre.source.ansi { white-space: pre-wrap; }
+
+        /* styled rendering of the html output lives in .md — this is a
+         * tiny "github-markdown-lite" written in the repo's palette */
+        .md { font-size: 15px; line-height: 1.7; color: var(--text); max-width: 780px; }
+        .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+            font-weight: 700; color: var(--text); margin: 1.5em 0 0.6em; line-height: 1.25;
+        }
+        .md h1 { font-size: 2.0em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+        .md h2 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+        .md h3 { font-size: 1.3em; }
+        .md h4 { font-size: 1.1em; }
+        .md p { margin: 0.7em 0; }
+        .md a { color: var(--link); text-decoration: none; }
+        .md a:hover { text-decoration: underline; }
+        .md del { color: var(--strike); }
+        .md code {
+            font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+            font-size: 0.88em;
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 0.12em 0.35em;
+        }
+        .md pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            overflow-x: auto;
+            margin: 0.9em 0;
+        }
+        .md pre code { background: none; border: 0; padding: 0; font-size: 0.88em; }
+        .md blockquote {
+            border-left: 3px solid var(--accent-dim);
+            background: var(--panel);
+            border-radius: 0 8px 8px 0;
+            margin: 0.9em 0;
+            padding: 0.5em 1.1em;
+            color: var(--muted);
+        }
+        .md ul, .md ol { padding-left: 1.6em; margin: 0.7em 0; }
+        .md li { margin: 0.25em 0; }
+        .md li > ul, .md li > ol { margin: 0.15em 0; }
+        .md li input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.4em; vertical-align: -1px; }
+        .md hr { border: 0; border-top: 2px solid var(--border); margin: 1.6em 0; }
+        .md img { max-width: 100%; border-radius: 8px; }
+
+        /* ---- status bar -------------------------------------------- */
+        footer {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            padding: 7px 16px;
+            border-top: 1px solid var(--border);
+            background: var(--panel);
+            font-size: 0.72rem;
+            color: var(--muted);
+            font-family: monospace;
+        }
+        footer .dot { color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <!-- ================= header: the toolbar ================= -->
+    <header>
+        <h1><span class="dash">md</span>-format <span style="color:var(--muted)">// markdown live preview</span></h1>
+        <div class="actions">
+            <button class="pill" id="resetBtn" title="restore the sample text">Reset</button>
+            <button class="pill" id="copyBtn" title="copy the current output">Copy</button>
+            <button class="pill primary" id="exportBtn" title="download the current output as a file">Export</button>
+            <select class="pill" id="outputSel" title="what the right pane shows">
+                <option value="html">HTML preview</option>
+                <option value="htmlsrc">HTML source</option>
+                <option value="text">Plain text</option>
+                <option value="ansi">ANSI / terminal</option>
+                <option value="markdown">Markdown (round-trip)</option>
+                <option value="ast">AST tree</option>
+            </select>
+            <label class="check"><input type="checkbox" id="syncScroll"> Sync scroll</label>
+            <label class="check"><input type="checkbox" id="themeToggle"> Dark mode</label>
+        </div>
+    </header>
+
+    <!-- ================= split layout ================= -->
+    <div class="layout">
+        <div class="pane">
+            <div class="pane-label">Editor <span class="hint">paste that AI text</span></div>
+            <textarea id="editor" spellcheck="false"></textarea>
+        </div>
+
+        <!-- draggable splitter between the two panes -->
+        <div id="divider"></div>
+
+        <div class="pane">
+            <div class="pane-label" id="previewLabel">HTML preview</div>
+            <div id="preview-scroll"></div>
+        </div>
+    </div>
+
+    <!-- ================= status bar ================= -->
+    <footer>
+        <span><span class="dot">●</span> ready</span>
+        <span id="statChars">0 chars</span>
+        <span id="statBlocks">0 blocks</span>
+        <span id="statTime">0 ms</span>
+        <span style="margin-left:auto">parse → ast → render, your own markdown engine</span>
+    </footer>
+
+    <!-- ================= the app ================= -->
+    <script type="module">
+        // build our own pipeline: parser + renderers live in sibling files so
+        // the demo is thin — it just feeds text in and draws the result.
+        import { parse } from "./mdparser.js";
+        import { render } from "./renderers.js";
+
+        /* ---- grab the DOM bits we'll need ---- */
+        const editor      = document.getElementById("editor");
+        const preview     = document.getElementById("preview-scroll");
+        const previewLabel = document.getElementById("previewLabel");
+        const outputSel   = document.getElementById("outputSel");
+        const resetBtn    = document.getElementById("resetBtn");
+        const copyBtn     = document.getElementById("copyBtn");
+        const exportBtn   = document.getElementById("exportBtn");
+        const syncCheck   = document.getElementById("syncScroll");
+        const themeToggle = document.getElementById("themeToggle");
+        const statChars   = document.getElementById("statChars");
+        const statBlocks  = document.getElementById("statBlocks");
+        const statTime    = document.getElementById("statTime");
+        const footerDot   = document.querySelector("footer .dot");
+
+        /* ---- sample document — exercises every feature we support ---- */
+        const SAMPLE = `# md-format\n\nHey **bold**, *italic*, \`inline code\`, ~~strikethrough~~, and a [link](https://example.com "with a title").\n\n> Quote block. CommonMark has a rule about "lazy continuation", we just keep it simple.\n\n1. ordered list\n2. second item\n   - nested bullet\n   - \`inner code\`\n\n- [x] done task\n- [ ] open task\n\n\`\`\`js\nconst greet = name => \`hey \${name}\`;\nconsole.log(greet("world"));\n\`\`\`\n\nAuto-links work too — visit https://aigsniperyt.github.io for the whole catalogue.\n\n---\n\n*italics via **bold inside italics**.*`.trim();
+
+        /* ---- theming ---- */
+        const savedTheme = localStorage.getItem("mdformat-theme") || "dark";
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        themeToggle.checked = savedTheme === "dark";
+        themeToggle.addEventListener("change", () => {
+            const dark = themeToggle.checked;
+            document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+            localStorage.setItem("mdformat-theme", dark ? "dark" : "light");
+        });
+
+        /* ---- escaping for the "source" views ---- */
+        const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        /* ---- the one render function powering every output mode ---- */
+        function refresh() {
+            try {
+                const src = editor.value;
+                const t0 = performance.now();
+
+                // parse once, render however the select says
+                const ast = parse(src);
+                const type = outputSel.value;
+
+                // html "preview" is the pretty one; everything else is a <pre>
+                switch (type) {
+                    case "html": {
+                        const html = render(ast, "html");
+                        // wrapped in .md so the preview styles (below) apply
+                        preview.innerHTML = `<div class="md">${html}</div>`;
+                        preview.removeAttribute("data-raw");
+                        break;
+                    }
+                    case "htmlsrc":
+                    case "text":
+                    case "ansi":
+                    case "markdown": {
+                        let out = render(ast, type);
+                        if (type === "ansi") {
+                            // make the invisible ESC control-char visible as text,
+                            // and highlight it so the codes are legible
+                            out = out.replace(/\u001b/g, "\u241B");   // swap real ESC bytes for a visible "␛"
+                            out = out.replace(/␛\[/g, "&#92;x1b[");
+                        }
+                        preview.innerHTML = `<pre class="source ansi">${esc(out)}</pre>`;
+                        preview.setAttribute("data-raw", "1");
+                        break;
+                    }
+                    case "ast": {
+                        // the tree itself — education mode
+                        const json = JSON.stringify(ast, null, 2);
+                        preview.innerHTML = `<pre class="source">${esc(json)}</pre>`;
+                        preview.setAttribute("data-raw", "1");
+                        break;
+                    }
+                }
+
+                previewLabel.textContent = outputSel.options[outputSel.selectedIndex].text;
+
+                const ms = performance.now() - t0;
+                statChars.textContent = `${src.length.toLocaleString()} chars`;
+                statBlocks.textContent = `${ast.children.length} top-level blocks`;
+                statTime.textContent = `${ms.toFixed(1)} ms`;
+                footerDot.textContent = "●";
+                footerDot.style.color = "var(--accent)";
+            } catch (err) {
+                // don't let a parse error nuke the page — show it instead
+                preview.innerHTML = `<pre class="source" style="color:#ff6b6b">${esc(String(err && err.stack || err))}</pre>`;
+                footerDot.textContent = "●";
+                footerDot.style.color = "#ff6b6b";
+            }
+        }
+
+        /* ---- live re-render with a tiny debounce (keeps typing smooth) ---- */
+        let refreshTimer = null;
+        const scheduleRefresh = () => {
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(refresh, 120);
+        };
+        editor.addEventListener("input", scheduleRefresh);
+        outputSel.addEventListener("change", refresh);
+
+        /* ---- Reset: put the sample back ---- */
+        resetBtn.addEventListener("click", () => { editor.value = SAMPLE; refresh(); });
+
+        /* ---- Copy: current output to the clipboard ---- */
+        copyBtn.addEventListener("click", async () => {
+            try {
+                const out = preview.textContent;   // works for every mode
+                await navigator.clipboard.writeText(out);
+                copyBtn.textContent = "Copied!";
+                setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+            } catch (err) {
+                alert("copy failed: " + err.message);
+            }
+        });
+
+        /* ---- Export: download the current output as a file ---- */
+        const EXT = { html: "html", htmlsrc: "html", text: "txt", ansi: "txt", markdown: "md", ast: "json" };
+        exportBtn.addEventListener("click", () => {
+            const type = outputSel.value;
+            const blob = new Blob([preview.textContent], { type: "text/plain" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `md-format-output.${EXT[type]}`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        });
+
+        /* ---- sync scroll: mirror editor scroll onto preview (and back) ---- */
+        let syncingFrom = "";   // guards against feedback loops
+        function scrollSync(from, to) {
+            if (!syncCheck.checked) return;
+            if (syncingFrom === from) return;      // we caused this scroll
+            const ratio = from.scrollTop / Math.max(1, from.scrollHeight - from.clientHeight);
+            syncingFrom = to;
+            to.scrollTop = ratio * Math.max(0, to.scrollHeight - to.clientHeight);
+            syncingFrom = "";
+        }
+        editor.addEventListener("scroll", () => scrollSync(editor, preview));
+        preview.addEventListener("scroll", () => scrollSync(preview, editor));
+
+        /* ---- Tab in the editor inserts two spaces instead of jumping ---- */
+        editor.addEventListener("keydown", (e) => {
+            if (e.key === "Tab") {
+                e.preventDefault();
+                const start = editor.selectionStart, end = editor.selectionEnd;
+                editor.value = editor.value.slice(0, start) + "  " + editor.value.slice(end);
+                editor.selectionStart = editor.selectionEnd = start + 2;
+                refresh();
+            }
+        });
+
+        /* ---- draggable splitter ---------------------------------------- */
+        const divider = document.getElementById("divider");
+        let dragging = false;
+        divider.addEventListener("mousedown", () => { dragging = true; divider.classList.add("dragging"); });
+        window.addEventListener("mousemove", (e) => {
+            if (!dragging) return;
+            const rect = document.querySelector(".layout").getBoundingClientRect();
+            const rel = (e.clientX - rect.left) / rect.width;         // 0..1
+            const clamped = Math.min(0.85, Math.max(0.15, rel));
+            editor.parentElement.style.flex = `0 0 ${clamped * 100}%`;
+        });
+        window.addEventListener("mouseup", () => { dragging = false; divider.classList.remove("dragging"); });
+
+        /* ---- go ---- */
+        editor.value = SAMPLE;
+        refresh();
+    </script>
+</body>
+</html>

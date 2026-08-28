@@ -33,8 +33,10 @@ python3 -m http.server 8000     # from this repo, then open :8000
   preview mode the rendered document is **bidirectionally editable** — type
   straight into the rendered output (WYSIWYG) and your keystrokes are folded
   back into the markdown source; task checkboxes are clickable; the caret is
-  restored to the exact spot after every round-trip.
-- **`test.html`** — the test harness: 29 locked-in parsing cases, run green or you'll
+  restored to the exact spot after every round-trip. The sample doc includes
+  `$…$`/`$$…$$` maths, and the page loads KaTeX from a CDN to typeset it
+  (delete those `<head>` lines and the raw tex still shows).
+- **`test.html`** — the test harness: 49 locked-in parsing cases, run green or you'll
   know about it.
 
 ## Use it as an API — invoke from anywhere
@@ -117,10 +119,47 @@ a node type: every renderer must handle it).
   CommonMark parsers), `~~strikethrough~~`, inline code, links `[x](url "title")`,
   `<https://autolinks>` and *bare* URLs (`a raw https://… in a sentence`),
   images, backslash escapes, raw-HTML passthrough.
+- **Maths:** `$…$` inline and `$$…$$` display maths are parsed natively — the
+  whole `$…$`/`$$…$$` span is consumed as one node, so the `_`, `*`, `^` and
+  `\` inside the tex (`\lim_{x\to 0} \frac{\sin x}{x}`) are never eaten by the
+  bold/italic/strike rules. A non-empty, single-line `$…$` with no leading or
+  trailing space becomes maths; anything else (currency `$5.00`, a lone
+  `a $ b`) stays ordinary text. Renderers keep the raw delimiters, and the
+  html output carries the tex in `data-tex` so it round-trips losslessly.
+  See [Maths](#maths) below.
 - **Deviation from CommonMark:** we skip the Recipe-for-Doom delimiter stack.
   Our two-pass closer (exact-run-first) handles the 95% case *and* the usual
   nesting patterns; truly pathological spacing can still surprise. It's the
   price of leaving the parser human-readable.
+
+## Maths
+
+Maths parsing is **built in and on by default** — it costs no dependencies and
+produces readable output even with nothing else loaded:
+
+- `$…$` → `<span class="md-math" data-tex="…">…</span>`
+- `$$…$$` → `<div class="md-math md-math-display" data-tex="…">…</div>`
+  (a `$$` line opens a display block: one line of `$$tex$$`, or tex lines until
+  a closing `$$`/end of document; a `$$…$$` mid-sentence is a display-mode
+  span instead).
+- The raw tex is echoed into the element as fallback text and kept in
+  `data-tex`, so `domToMarkdown()` can always walk the DOM back to `$…$`/`$$…$$`
+  even after KaTeX has replaced the visible body.
+
+### Pretty rendering (optional, external)
+
+md-format never bundles KaTeX (that would break the zero-dependency, runs-in-a-
+worker promise). Instead, if your page already loads a KaTeX build
+(`window.katex`), call the hook and every `.md-math` gets real typeset maths:
+
+```js
+import { render, renderMathWithKatex } from "./mdeditor.js";
+el.innerHTML = `<div class="md">${render(ast, "html")}</div>`;
+renderMathWithKatex(el);                      // no-op if window.katex is absent
+```
+
+The embeddable editor (`mdeditor.js`) calls this automatically on every refresh
+when KaTeX is present, and leaves the maths readable when it isn't.
 
 ## Test harness
 

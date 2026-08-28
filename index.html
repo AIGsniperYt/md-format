@@ -131,7 +131,16 @@
             font-family: monospace;
         }
         footer .dot { color: var(--accent); }
+        /* KaTeX draws maths in its own black-on-white by default — make the
+           typeset maths follow the page theme instead */
+        .md .katex { color: inherit; }
     </style>
+
+    <!-- OPTIONAL maths prettifier: $x$ / $$x$$ always parse — without these
+         lines the raw tex shows as-is (still maths, just not typeset). Load
+         KaTeX and mdeditor.js auto-typesets every .md-math on each refresh. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 </head>
 <body>
 
@@ -171,7 +180,7 @@
         <span id="statChars">0 chars</span>
         <span id="statBlocks">0 blocks</span>
         <span id="statTime">0 ms</span>
-        <span style="margin-left:auto">parse → ast → render, your own markdown engine</span>
+        <span style="margin-left:auto"></span>
     </footer>
 
     <!-- ================= the app ================= -->
@@ -184,7 +193,7 @@
 
         /* ---- sample document — exercises every feature we support, tabs
          *      included so the preview has a real table to draw ---- */
-        const SAMPLE = `# md-format\n\nHey **bold**, *italic*, \`inline code\`, ~~strikethrough~~, and a [link](https://example.com "with a title").\n\n> Quote block. CommonMark has a rule about "lazy continuation", we just keep it simple.\n\n| Feature | Status |\n| --- | --- |\n| **tables** | inline code \`works\` |\n| wysiwyg | [link](https://example.com "again") |\n\n1. ordered list\n2. second item\n   - nested bullet\n   - \`inner code\`\n\n- [x] done task\n- [ ] open task\n\n\`\`\`js\nconst greet = name => \`hey \${name}\`;\nconsole.log(greet("world"));\n\`\`\`\n\nAuto-links work too — visit https://aigsniperyt.github.io for the whole catalogue.\n\n---\n\n*italics via **bold inside italics**.*`.trim();
+        const SAMPLE = `# md-format\n\nHey **bold**, *italic*, \`inline code\`, ~~strikethrough~~, and a [link](https://example.com "with a title").\n\n> Quote block. CommonMark has a rule about "lazy continuation", we just keep it simple.\n\n| Feature | Status |\n| --- | --- |\n| **tables** | inline code \`works\` |\n| wysiwyg | [link](https://example.com "again") |\n\n1. ordered list\n2. second item\n   - nested bullet\n   - \`inner code\`\n\n- [x] done task\n- [ ] open task\n\n\`\`\`js\nconst greet = name => \`hey \${name}\`;\nconsole.log(greet("world"));\n\`\`\`\n\nMaths is native — inline $x^2 + y^2 = z^2$ keeps the tex away from the bold/italic rules, and a solo line opens a display block:\n\n$$\\lim_{x\\to 0} \\frac{\\sin x}{x} = 1$$\n\nThe raw tex always shows; loading KaTeX (see the optional scripts in the <head>) typesets it for real.\n\nAuto-links work too — visit https://aigsniperyt.github.io for the whole catalogue.\n\n---\n\n*italics via **bold inside italics**.*`.trim();
 
         /* ---- the ONE editor instance ---- */
         const app = document.getElementById("app");

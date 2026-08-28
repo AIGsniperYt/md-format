@@ -95,6 +95,19 @@
             ["bare url",                "see https://a.io.",                     '<p>see <a href="https://a.io">https://a.io</a></p>', "html"],
             ["hard line break",         "a  \nb",                                "<p>a<br>\nb</p>", "html"],
 
+            // --- maths ---
+            ["math inline",              "a $b$ c",                                 '<p>a <span class="md-math" data-tex="b">b</span> c</p>', "html"],
+            ["math display block",       "$$\n\\frac{1}{2}\n$$",                    '<div class="md-math md-math-display" data-tex="\\frac{1}{2}">\\frac{1}{2}</div>', "html"],
+            ["math display one-line",    "$$x^2$$",                                 '<div class="md-math md-math-display" data-tex="x^2">x^2</div>', "html"],
+            ["math inline display",      "area $$A=\\pi r^2$$ ok",                  '<p>area <span class="md-math md-math-display" data-tex="A=\\pi r^2">A=\\pi r^2</span> ok</p>', "html"],
+            ["math protects _ and *",    "$$\\lim_{x\\to 0} \\frac{\\sin x}{x} = 1$$",
+                                           '<div class="md-math md-math-display" data-tex="\\lim_{x\\to 0} \\frac{\\sin x}{x} = 1">\\lim_{x\\to 0} \\frac{\\sin x}{x} = 1</div>', "html"],
+            ["math ignores currency",    "sale: $5.00 and $6",                      "<p>sale: $5.00 and $6</p>", "html"],
+            ["math escaped dollar",      "price \\$5",                              "<p>price $5</p>", "html"],
+            ["math text round-trip",     "a $b$ c",                                 "a $b$ c", "text"],
+            ["math md round-trip",       "$$\n\\frac{1}{2}\n$$",                    "$$\n\\frac{1}{2}\n$$", "markdown"],
+            ["math md inline display",   "a $$b$$ c",                               "a $$b$$ c", "markdown"],
+
             // --- tables ---
             ["table, basic",               "| a | b |\n| --- | --- |\n| 1 | 2 |",
                                             "<table>\n<thead>\n<tr><th>a</th><th>b</th></tr>\n</thead><tbody>\n<tr><td>1</td><td>2</td></tr>\n</tbody></table>", "html"],

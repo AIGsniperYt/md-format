@@ -44,8 +44,41 @@ function mdBlock(node, depth) {
             return mdInlineChildren(node);
 
         case "blockquote": {
-            const inner = mdBlockChildren(node, depth).join("\n\n");
-            return inner.split("\n").map(line => `> ${line || ">"}`).join("\n");
+            /* A blockquote is usually dialogue or an excerpt: short inline
+             * text, often separated by <br> hard breaks. The naive per-line
+             * split below mangled those into "> >" empties and re-rendered
+             * as paragraph gaps + a single collapsed run. Walk the children
+             * instead: a <br> becomes a trailing hard-break marker ("  ") on
+             * its line, every other child maps through mdBlock, and we emit
+             * one "> " line per visual line. Empty blockquotes (or a
+             * trailing <br>) evaporate. */
+            const lines = [];
+            let cur = "";
+            const flush = (hard) => {
+                const trimmed = cur.trimEnd();
+                if (trimmed) lines.push(hard ? `${trimmed}  ` : trimmed);
+                cur = "";
+            };
+            for (const child of node.childNodes) {
+                if (child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "br") {
+                    flush(true);
+                    continue;
+                }
+                if (child.nodeType === Node.TEXT_NODE && !child.textContent.trim()) continue;
+                // a nested block (blockquote/list) came back multi-line — carry
+                // each line through as its own blockquote line
+                const parts = mdBlock(child, depth).split("\n");
+                for (let i = 0; i < parts.length; i++) {
+                    cur += parts[i];
+                    if (i < parts.length - 1) flush(false);
+                }
+            }
+            flush(false);
+            if (!lines.length) return "";
+            // a dangling hard-break on the LAST line round-trips as dead
+            // trailing spaces (nothing follows to break to) — drop it
+            lines[lines.length - 1] = lines[lines.length - 1].replace(/[ \t]+$/, "");
+            return lines.map(l => `> ${l}`).join("\n");
         }
 
         case "ul":

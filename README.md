@@ -38,6 +38,9 @@ python3 -m http.server 8000     # from this repo, then open :8000
   (delete those `<head>` lines and the raw tex still shows).
 - **`test.html`** — the test harness: 49 locked-in parsing cases, run green or you'll
   know about it.
+- **`test-suite.html`** — the editor regression suite: parse/render round-trips,
+  word-style line breaks, taskbar view/soft-break/history behaviour, formatting
+  commands and the public API, all asserted in one page.
 
 ## Use it as an API — invoke from anywhere
 
@@ -108,6 +111,39 @@ render(tree, "html");            // …then draw it, however many ways you like
 shape is documented in the header comment of `mdparser.js` (heads-up if you add
 a node type: every renderer must handle it).
 
+### The embeddable editor (`mdeditor.js`)
+
+One zero-dependency WYSIWYG editor — toolbar, split panes, sync scroll, themes —
+built from the same parser/renderer. Drop one `<div>` in a page:
+
+```js
+import { createEditor } from "./mdeditor.js";
+const ed = createEditor(container, opts);
+```
+
+**`opts`** (all optional):
+
+| option | default | meaning |
+| ------ | ------- | ------- |
+| `value` | `""` | initial markdown |
+| `view` | `"split"` | `"split"` \| `"md"` (source only) \| `"preview"` (visual) |
+| `theme` | `"green"` | color palette for the editor chrome |
+| `toolbar` | all tools | list of tool ids, or `false` to hide the formatting buttons |
+| `taskbar` | `true` | adds the editor-owned view / line-break / history actions beside the toolbar; `false` for a chrome-free embed |
+| `storage` | `true` | persist view + theme per host (`localStorage`) |
+| `syncScroll` | `true` | keep split panes in scroll lockstep |
+| `readonly` | `false` | block editing |
+| `tabSize` | `4` | spaces inserted by Tab |
+| `softBreaks` | `false` | treat each Enter as a visible line break (word-style), preserving repeated blank lines in the preview |
+| `onSoftBreaksChange` | — | `fn(on)` fired when the taskbar toggles soft-breaks (for persisting the choice per document) |
+| `placeholder` | built-in | shown in the empty visual pane; also used as the source textarea placeholder |
+
+The returned instance: `setMarkdown(md)` / `getMarkdown()` / `setView(v)` /
+`command(toolId)` / `undo()` / `redo()` / `setSoftBreaks(on, {persist})` /
+`getSoftBreaks()` / `onChange(cb)` / `onRender(cb)` / `focus()` / `destroy()`.
+Typing, Tab, Enter and Ctrl/Cmd-Z/Y (plus `Shift-Z`) all feed the same undo
+stack, and the taskbar's undo/redo buttons stay in sync with it.
+
 ## What's supported
 
 - **Blocks:** atx headings (`#title`, no space — we're forgiving on purpose),
@@ -172,8 +208,11 @@ frozen until you deliberately change it. Run it any time before shipping.
 mdparser.js   the parser:   markdown text  →  AST          (the thinky half)
 renderers.js  the renderer: AST → html/text/ansi/markdown   (the drawy half)
 domtomd.js    the inverse:  rendered DOM   →  markdown text (WYSIWYG half)
+mdeditor.js   the editor:   createEditor() exposes toolbar + split panes + WYSIWYG
+mdeditor.css  the editor's own chrome (panes, toolbar, taskbar, preview, themes)
 index.html    the live editor: split / markdown / preview views + edit-in-preview
 test.html     assertions over the parser & renderers
+test-suite.html  editor regression suite (parse/render, taskbar, history, API)
 ```
 
 ## License

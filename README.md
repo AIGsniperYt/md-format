@@ -97,6 +97,24 @@ format("# Hi **there**", "ansi");     // '\u001b[1m\u001b[36mHi there\u001b[0m'
 format("#  Hi **there**  ", "markdown"); // '# Hi **there**'  (normalised)
 ```
 
+### `formatSafe(text, type = "html", opts = {}) → string`
+
+`format()` + `sanitizeHtml()` in one call. Use it whenever rendered HTML goes
+into `innerHTML` and the Markdown may not be fully trusted.
+
+```js
+import { formatSafe } from "./mdeditor.js";
+formatSafe("<script>alert(1)</script>\n\n**safe**", "html");
+// -> '<p><strong>safe</strong></p>' (script removed)
+```
+
+### `sanitizeHtml(html, opts = {}) → string`
+
+Basic hardening for rendered HTML: removes executable/embedded elements,
+form controls (except task-list checkboxes), inline event handlers and
+`javascript:` URLs. It is a safety boundary, not a full sandbox for hostile
+third-party pages.
+
 ### The two-step (when you want to keep the tree)
 
 ```js

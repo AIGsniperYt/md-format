@@ -9,12 +9,19 @@
 </style>
 <div id="results">running…</div><div id="fixture"></div>
 <script type="module">
-import { createEditor, parse, render, domToMarkdown } from "./mdeditor.js";
+import { createEditor, parse, render, domToMarkdown, formatSafe } from "./mdeditor.js";
 
 const results = [];
+const pending = [];
 function test(name, fn) {
   try { fn(); results.push({ name, ok: true }); }
   catch (error) { results.push({ name, ok: false, error: String(error?.stack || error) }); }
+}
+function testAsync(name, fn) {
+  pending.push((async () => {
+    try { await fn(); results.push({ name, ok: true }); }
+    catch (error) { results.push({ name, ok: false, error: String(error?.stack || error) }); }
+  })());
 }
 function equal(actual, expected, message = "") {
   if (actual !== expected) throw new Error(`${message} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -273,6 +280,37 @@ test("editor destroy removes all owned DOM", () => {
   equal(host.children.length, 0); equal(host.classList.contains("mdedit"), false);
 });
 
+test("DOM serialization turns non-breaking spaces back into normal spaces", () => {
+  const host = document.createElement("div");
+  host.textContent = "a\u00a0b";
+  equal(domToMarkdown(host), "a b");
+});
+
+test("formatSafe removes executable markup from rendered HTML", () => {
+  const html = formatSafe("<" + "script>alert(1)</" + "script>\n\n[x](javascript:alert(1))\n\n<img src=x onerror=alert(1)>", "html");
+  truthy(!/<script/i.test(html), "script removed");
+  truthy(!/onerror/i.test(html), "event handler removed");
+  truthy(!/javascript:/i.test(html), "javascript URL removed");
+  equal(formatSafe("# hi", "text"), "hi");
+});
+
+testAsync("a just-typed terminal space does not rewrite the markdown source", async () => {
+  const host = document.createElement("div"); document.querySelector("#fixture").append(host);
+  const ed = createEditor(host, { value: "hello", view: "preview", storage: false });
+  const root = ed.preview.querySelector(".md") || ed.preview;
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  root.textContent = "hello\u00a0";
+  root.dispatchEvent(new Event("input", { bubbles: true }));
+  await wait(220);
+  equal(ed.getMarkdown(), "hello");
+  root.textContent = "hello world";
+  root.dispatchEvent(new Event("input", { bubbles: true }));
+  await wait(220);
+  equal(ed.getMarkdown(), "hello world");
+  ed.destroy();
+});
+
+await Promise.all(pending);
 const failed = results.filter(result => !result.ok);
 document.querySelector("#results").textContent = `${failed.length ? "FAIL" : "PASS"} — ${results.length - failed.length}/${results.length} tests passed\n` +
   results.map(result => `${result.ok ? "✓" : "✗"} ${result.name}${result.error ? `\n  ${result.error}` : ""}`).join("\n");
